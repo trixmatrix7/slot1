@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Slot — 1:1 Layout Clone (Placeholder Assets)</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- #screen = der 16:9 "iframe"-Bereich. Wird per JS auf die größte 16:9-Fläche skaliert. -->
+  <div id="screen">
+    <!-- Dein Hintergrund kommt HIER rein (CSS background-image von #bg ersetzen). -->
+    <div id="bg">
+      <div id="bg-hint">DEIN&nbsp;BACKGROUND&nbsp;HIER<br /><span>(styles.css → #bg)</span></div>
+    </div>
+    <!-- Pixi-Canvas wird hier eingehängt (transparent, damit #bg durchscheint). -->
+    <div id="game"></div>
+  </div>
+
+  <!-- Pixi.js v7 (UMD global "PIXI") — lokal, damit Doppelklick/Offline funktioniert -->
+  <script src="vendor/pixi.min.js"></script>
+  <script>
+    // Fallback auf CDN, falls die lokale Datei fehlt
+    if (!window.PIXI) {
+      document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.4.2/pixi.min.js"><\/script>');
+    }
+  </script>
+
+  <!-- Reihenfolge wichtig: erst Config/Core, dann Grid/Engine/UI, dann Bootstrap -->
+  <script src="src/config.js"></script>
+  <script src="src/core.js"></script>
+  <script src="src/math.js"></script>
+  <script src="src/grid.js"></script>
+  <script src="src/engine.js"></script>
+  <script src="src/ui.js"></script>
+  <script src="src/main.js"></script>
+</body>
+</html>

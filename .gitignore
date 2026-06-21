@@ -1,0 +1,15 @@
+# Großes Original-Master-Bild (die optimierte assets/background.jpg wird genutzt)
+assets/hf_*.png
+
+# Lokale Dev-/Editor-Konfig
+.claude/
+.vscode/
+.idea/
+
+# Node
+node_modules/
+
+# OS-Müll
+.DS_Store
+Thumbs.db
+desktop.ini
