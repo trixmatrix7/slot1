@@ -9,6 +9,9 @@ assets/hf_*.png
 # Node
 node_modules/
 
+# Roh-Importe (Spritesheet-Exporte werden nach assets/anim/ kopiert)
+_incoming/
+
 # OS-Müll
 .DS_Store
 Thumbs.db

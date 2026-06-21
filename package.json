@@ -1,0 +1,25 @@
+{
+  "name": "slot-1",
+  "version": "1.0.0",
+  "description": "Ein 6×5 **Tumble / Scatter-Pays** Slot mit Free-Spins-Feature, gebaut in **Pixi.js**. Reines Frontend (HTML/JS/CSS) — bereit für statisches Hosting (Vercel) und für späteren **On-Chain-Betrieb auf BASE** (austauschbare RNG).",
+  "main": "calibrate.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/trixmatrix7/slot1.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/trixmatrix7/slot1/issues"
+  },
+  "homepage": "https://github.com/trixmatrix7/slot1#readme",
+  "dependencies": {
+    "pngjs": "^7.0.0"
+  }
+}

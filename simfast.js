@@ -31,9 +31,9 @@ const CUM_NOSC = buildCum((i) => KIND[i] !== 2);
 
 const N_CELLS = C.COLS * C.ROWS;
 const MAXW = C.MAX_WIN_X;
+const SCAP = C.MAX_SCATTERS || 4;
 const FS = C.FREESPINS;
-const MSTART = FS.multiplier.start, MFAC = FS.multiplier.factor, MMAX = FS.multiplier.max, MSTEP = FS.multiplier.step, MACC = FS.multiplier.accel || 0;
-const MULT_MODE_FAC = MFAC && MFAC > 1;
+const MSTART = FS.multiplier.start || 1, MMAX = FS.multiplier.max || 100, MPERSPIN = FS.multiplier.perSpin || 1;
 const SCATTER_IN_FS = !!FS.scatterInFreeSpins;
 const RT = FS.retriggerByScatters || {};
 
@@ -73,13 +73,21 @@ const board = new Int8Array(N_CELLS);
 const counts = new Int32Array(NS);
 const winFlag = new Uint8Array(NS);
 
-function fill(rng) { for (let k = 0; k < N_CELLS; k++) board[k] = pick(rng, CUM_FULL); }
+function fill(rng) {
+  let sc = 0;
+  for (let k = 0; k < N_CELLS; k++) {
+    let id = pick(rng, CUM_FULL);
+    if (id === SCAT) { if (sc >= SCAP) id = pick(rng, CUM_NOSC); else sc++; }
+    board[k] = id;
+  }
+}
 
-// resolve: gibt winX zurück, schreibt scatters in out[0]
-function resolve(rng, isFS, state, out) {
+// resolve: Basis-Win des Spins (ohne FS-Multi), scatters in out[0] (capped).
+function resolve(rng, isFS, out) {
+  const allowSc = isFS && SCATTER_IN_FS;
   let winX = 0;
   for (;;) {
-    for (let i = 0; i < NS; i++) { counts[i] = 0; winFlag[i] = 0; }
+    for (let i = 0; i < NS; i++) counts[i] = 0;
     let wild = 0;
     for (let k = 0; k < N_CELLS; k++) {
       const id = board[k];
@@ -87,56 +95,58 @@ function resolve(rng, isFS, state, out) {
       else if (id === SCAT) { /* zählt nicht */ }
       else counts[id]++;
     }
-    let totalX = 0, anyWin = false;
+    let winIdx = -1, x = 0;
     for (let p = 0; p < PAYIDX.length; p++) {
       const idx = PAYIDX[p];
       if (counts[idx] > 0) {
         let eff = counts[idx] + wild; if (eff > N_CELLS) eff = N_CELLS;
-        const x = payTab[p][eff];
-        if (x > 0) { totalX += x; winFlag[idx] = 1; anyWin = true; }
+        const xx = payTab[p][eff];
+        if (xx > 0) { winIdx = idx; x = xx; break; }
       }
     }
-    if (!anyWin) break;
-    const mult = isFS ? state.m : 1;
-    winX += totalX * mult;
-    const refillCum = (isFS && SCATTER_IN_FS) ? CUM_FULL : CUM_NOSC;
+    if (winIdx < 0) break;
+    winX += x;
+    let sc = 0; if (allowSc) for (let k = 0; k < N_CELLS; k++) if (board[k] === SCAT) sc++;
     for (let k = 0; k < N_CELLS; k++) {
       const id = board[k];
       if (id === SCAT) continue;
-      if (id === WILD || winFlag[id]) board[k] = pick(rng, refillCum);
-    }
-    if (isFS) {
-      if (MULT_MODE_FAC) state.m = Math.min(MMAX, state.m * MFAC);
-      else { state.m = Math.min(MMAX, state.m + state.step); state.step += MACC; }
+      if (id === WILD || id === winIdx) {
+        let nid;
+        if (allowSc && sc < SCAP) { nid = pick(rng, CUM_FULL); if (nid === SCAT) sc++; }
+        else nid = pick(rng, CUM_NOSC);
+        board[k] = nid;
+      }
     }
   }
-  let sc = 0;
-  for (let k = 0; k < N_CELLS; k++) if (board[k] === SCAT) sc++;
-  out[0] = sc;
+  let scc = 0; for (let k = 0; k < N_CELLS; k++) if (board[k] === SCAT) scc++;
+  out[0] = Math.min(scc, SCAP);
   return winX;
 }
 
+let FS_SPINS = 0, FS_MAXLEN = 0, FS_MAXMULT = 0;
 function runFS(rng, award) {
-  let left = award, done = 0, fsWin = 0;
-  const state = { m: MSTART, step: MSTEP };
+  let left = award, done = 0, fsWin = 0, m = MSTART;
   const out = [0];
   while (left > 0 && done < FS.maxSpins) {
     left--; done++;
     fill(rng);
-    fsWin += resolve(rng, true, state, out);
-    const sc = out[0];
-    left += sc >= 3 ? (RT[3] || 0) : sc >= 2 ? (RT[2] || 0) : 0;
+    const w = resolve(rng, true, out);   // Basis-Win
+    fsWin += w * m;                       // Spin-Win × Per-Spin-Multi
+    if (w > 0) m = Math.min(MMAX, m + MPERSPIN);
+    if (out[0] >= 3) left += (RT[3] || 0);
   }
+  FS_SPINS += done; if (done > FS_MAXLEN) FS_MAXLEN = done; if (m > FS_MAXMULT) FS_MAXMULT = m;
   return fsWin;
 }
 
 function runMany(N, seed) {
   const rng = makeRng(seed);
   const out = [0];
+  FS_SPINS = 0; FS_MAXLEN = 0; FS_MAXMULT = 0;
   let total = 0, baseSum = 0, hits = 0, fs = 0, ccap = 0, maxX = 0;
   for (let i = 0; i < N; i++) {
     fill(rng);
-    const bw = resolve(rng, false, null, out);
+    const bw = resolve(rng, false, out);
     baseSum += bw;
     let x = bw;
     if (out[0] >= 3) { fs++; x += runFS(rng, triggerAward(out[0])); }
@@ -145,16 +155,17 @@ function runMany(N, seed) {
     if (x > 0) hits++;
     if (x > maxX) maxX = x;
   }
-  return { rtp: total / N * 100, baseRtp: baseSum / N * 100, hitRate: hits / N * 100, fsFreq: N / fs, ccap, maxX, N };
+  return { rtp: total / N * 100, baseRtp: baseSum / N * 100, hitRate: hits / N * 100, fsFreq: N / fs,
+    ccap, maxX, N, avgFsLen: fs ? FS_SPINS / fs : 0, maxFsLen: FS_MAXLEN, maxMult: FS_MAXMULT };
 }
 
 const N = parseInt(process.argv[2], 10) || 50000000;
 const scales = process.argv.slice(3).map(Number);
 if (!scales.length) scales.push(0.066, 0.0675, 0.069);
 
-console.log("factor=" + MFAC + "   N=" + N.toLocaleString("de-DE") + " pro Skala");
-console.log("PAY_SCALE | RTP%   | Basis% | FS%    | Hit%  | FS(1in) | maxWin | Cap (1 in)");
-console.log("----------+--------+--------+--------+-------+---------+--------+-----------");
+console.log("multi=+" + MPERSPIN + "/win-spin   N=" + N.toLocaleString("de-DE") + " pro Skala");
+console.log("PAY_SCALE | RTP%   | Basis% | FS%    | Hit%  | FS(1in) | maxWin | avgFS | maxFS | maxMult");
+console.log("----------+--------+--------+--------+-------+---------+--------+-------+-------+--------");
 const t0 = Date.now();
 const rows = [];
 for (let i = 0; i < scales.length; i++) {
@@ -169,7 +180,9 @@ for (let i = 0; i < scales.length; i++) {
     r.hitRate.toFixed(1).padStart(5) + " | " +
     String(Math.round(r.fsFreq)).padStart(7) + " | " +
     r.maxX.toFixed(0).padStart(6) + " | " +
-    "1 in " + (r.ccap ? Math.round(r.N / r.ccap) : "—") + " (" + r.ccap + ")"
+    r.avgFsLen.toFixed(1).padStart(5) + " | " +
+    String(r.maxFsLen).padStart(5) + " | " +
+    String(r.maxMult).padStart(6)
   );
 }
 console.log("Dauer: " + ((Date.now() - t0) / 1000).toFixed(0) + "s");

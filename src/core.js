@@ -24,7 +24,9 @@
   };
 
   /* ---------- Promise-Delay (Browser-Timer, kein Date nötig) ---------- */
-  LF.delay = (ms) => new Promise((res) => setTimeout(res, ms));
+  // Globaler Tempo-Faktor (Turbo): 1 = normal, <1 = schneller.
+  LF.speed = 1;
+  LF.delay = (ms) => new Promise((res) => setTimeout(res, ms * (LF.speed || 1)));
 
   /* ============================================================
      TWEEN — minimaler, Promise-basierter Tween über Pixi-Ticker.
@@ -34,6 +36,7 @@
     _items: [],
     to(target, props, duration, easeFn) {
       easeFn = easeFn || LF.ease.outQuad;
+      duration = duration * (LF.speed || 1); // Turbo skaliert auch Tweens
       return new Promise((resolve) => {
         const from = {};
         for (const k in props) from[k] = target[k];
@@ -168,6 +171,49 @@
           })
       )
     );
+    await LF.loadSymbolAnims(); // Animations-Sheets (optional) nachladen
     return LF.textures;
+  };
+
+  /* ============================================================
+     SYMBOL-ANIMATIONEN — lädt die (transparenten) Spritesheets aus
+     CONFIG.SYMBOL_ANIM und schneidet sie in Frame-Texturen.
+     LF.symbolAnims[id] = { landing:[Texture...]|null, win:[Texture...]|null }
+     Fehlt ein Sheet -> still null (Symbol bleibt statisch).
+     ============================================================ */
+  LF.symbolAnims = {};
+  LF.loadSymbolAnims = async function () {
+    const C = LF.CONFIG;
+    const defs = (C && C.SYMBOL_ANIM) || {};
+    const sliceSheet = (img, d) => {
+      const base = PIXI.BaseTexture.from(img);
+      const fw = img.naturalWidth / d.cols;
+      const fh = img.naturalHeight / d.rows;
+      const frames = [];
+      for (let i = 0; i < d.frames; i++) {
+        const cx = (i % d.cols) * fw;
+        const cy = Math.floor(i / d.cols) * fh;
+        frames.push(new PIXI.Texture(base, new PIXI.Rectangle(cx, cy, fw, fh)));
+      }
+      return frames;
+    };
+    const loadSheet = (url, d) =>
+      new Promise((resolve) => {
+        if (!url) return resolve(null);
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => { try { resolve(sliceSheet(img, d)); } catch (e) { resolve(null); } };
+        img.onerror = () => resolve(null); // fehlendes Sheet -> Symbol bleibt statisch
+        img.src = url;
+      });
+
+    await Promise.all(
+      Object.keys(defs).map(async (id) => {
+        const d = defs[id];
+        const [landing, win] = await Promise.all([loadSheet(d.landing, d), loadSheet(d.win, d)]);
+        LF.symbolAnims[id] = { landing, win };
+      })
+    );
+    return LF.symbolAnims;
   };
 })();

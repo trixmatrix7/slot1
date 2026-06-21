@@ -93,11 +93,28 @@
       this.stake = this.bet;        // Käufe zum Grundeinsatz (Boost gilt nur für Basisspiele)
       this._runningX = 0;
       const award = C.FREESPINS.trigger[scatters] || 10;
-      await this._runFreeSpins(award);
 
-      this._settleWin();
-      this.ui.setSpinning(false);
-      this.busy = false;
+      try {
+        // Guaranteed-Bonus-Spin: genau N Scatter droppen (mit Sweat) ...
+        if (LF.sound) LF.sound.spin();
+        await this.grid.spawnGuaranteed(scatters, true);
+        await this.grid.scatterTension();   // Landing-Glow-Tension
+        await this.grid.scatterWinBurst();  // Scatter-Win-Burst (Kauf -> immer Trigger)
+        if (LF.sound) LF.sound.scatter();
+        await LF.delay(300);
+        // ... dann Free-Games-Intro mit START ...
+        await this.ui.showFreeSpinsIntro(award);
+        // ... dann die Free Spins.
+        await this._runFreeSpins(award);
+
+        await this._settleWin();
+      } catch (e) {
+        console.error("buyFeature error:", e);
+      } finally {
+        // busy/Spinning IMMER zurücksetzen -> kein Soft-Lock bei einem Anim-/Render-Fehler.
+        this.ui.setSpinning(false);
+        this.busy = false;
+      }
     }
 
     /* ---------- Hauptspin ---------- */
@@ -112,51 +129,70 @@
       this.busy = true;
       this.ui.setSpinning(true);
       this.ui.setWin(0);
+      if (LF.sound) LF.sound.spin();
 
       this.stake = cost;
       this.balance -= cost;
       this.ui.setBalance(this.balance);
 
       this._runningX = 0;
-      await this.grid.spawnAll();
+      let ok = true;
+      try {
+        await this.grid.spawnAll(); // Sirene/Anticipation passiert in spawnAll bei 2+ Scatter
+        await this.grid.scatterTension(); // ab 2 Scatter: Landing-Glow-Tension nach dem Landen
 
-      const base = await this._resolveBoard(false);
+        const base = await this._resolveBoard(false);
 
-      const award = LF.Math.triggerAward(base.scatters);
-      if (award > 0) {
-        await LF.delay(400);
-        await this._runFreeSpins(award);
+        const award = LF.Math.triggerAward(base.scatters);
+        if (award > 0) {
+          await this.grid.scatterWinBurst(); // Scatter-Win-Burst beim Trigger
+          if (LF.sound) LF.sound.scatter();
+          await LF.delay(400);
+          await this.ui.showFreeSpinsIntro(award); // Free-Games-Intro mit START
+          await this._runFreeSpins(award);
+        }
+
+        await this._settleWin();
+      } catch (e) {
+        ok = false;
+        console.error("spin error:", e);
+      } finally {
+        // busy/Spinning IMMER zurücksetzen -> kein Soft-Lock bei einem Anim-/Render-Fehler.
+        this.ui.setSpinning(false);
+        this.busy = false;
       }
 
-      this._settleWin();
-      this.ui.setSpinning(false);
-      this.busy = false;
-
-      if (this.autoplay) {
+      if (ok && this.autoplay) {
         await LF.delay(250);
         this.spin();
       }
     }
 
-    // Gesamtgewinn deckeln + gutschreiben (× this.stake)
-    _settleWin() {
+    // Gesamtgewinn deckeln + gutschreiben (× this.stake) + Win-Celebration
+    async _settleWin() {
       const totalX = Math.min(this._runningX, C.MAX_WIN_X);
       const win = totalX * this.stake;
       this.balance += win;
       this.ui.setBalance(this.balance);
       this.ui.setWin(win > 0 ? win : 0);
+      // Win-Celebration ab 15× Einsatz (Superb / Sensational / Epic)
+      if (totalX >= 15) await this.ui.showWinCelebration(win, totalX);
     }
 
     /* ---------- Tumble-Loop für ein Board (Animation) ---------- */
-    async _resolveBoard(freeSpins) {
-      let boardX = 0;
+    // Cascade-Auflösung: pro Tumble EIN Symbol-Typ, sammelt den BASIS-Win
+    // (KEIN Multiplikator hier — der kommt in FS am Spin-Ende).
+    async _resolveBoard() {
+      let boardX = 0, step = 0;
       for (;;) {
         const res = LF.Math.evaluate(this.grid.toIdGrid());
         if (res.totalX <= 0) break;
 
-        const mult = freeSpins ? this.fsMultiplier : 1;
-        boardX += res.totalX * mult;
-        this._runningX += res.totalX * mult;
+        boardX += res.totalX;
+        this._runningX += res.totalX;
+
+        step++;
+        if (LF.sound) LF.sound.connect(step); // Handschellen-Klick pro Connection
 
         const removeSet = new Set(res.remove.map(([c, r]) => c + "," + r));
         const highlights = [];
@@ -169,55 +205,48 @@
 
         this.ui.setWin(this._runningX * this.stake);
         await this.grid.applyTumble(removeSet);
-
-        if (freeSpins) {
-          const mc = C.FREESPINS.multiplier;
-          if (mc.factor && mc.factor > 1) {
-            this.fsMultiplier = Math.min(mc.max, this.fsMultiplier * mc.factor);
-          } else {
-            this.fsMultiplier = Math.min(mc.max, this.fsMultiplier + this.fsStep);
-            this.fsStep += mc.accel || 0;
-          }
-          const r = Math.round(this.fsMultiplier);
-          // Bei Erhöhung: Multi mittig zeigen, hoch in die Box fliegen lassen (setzt dort den Wert).
-          if (r > this._lastShownMult) {
-            this._lastShownMult = r;
-            await this.ui.flashMultiplier(r);
-          } else {
-            this.ui.setFSMultiplier(r);
-          }
-        }
+        await LF.delay(C.TIMING.stepPause || 120); // kurze Pause -> Connections sichtbar nacheinander
       }
       return { winX: boardX, scatters: this.grid.countScatters() };
     }
 
-    /* ---------- Free-Spins-Feature ---------- */
+    /* ---------- Free-Spins-Feature (Per-Spin-Multiplikator) ---------- */
     async _runFreeSpins(award) {
+      const mc = C.FREESPINS.multiplier;
+      const rt = C.FREESPINS.retriggerByScatters || {};
       let total = award, done = 0;
-      this.fsMultiplier = C.FREESPINS.multiplier.start;
-      this.fsStep = C.FREESPINS.multiplier.step;
-      this._lastShownMult = Math.round(this.fsMultiplier);
+      let m = mc.start || 1;                 // wächst +perSpin pro gewonnenem Spin
       const startX = this._runningX;
 
-      // In FS dürfen Scatter beim Nachrutschen reindroppen.
       this.grid.allowScatterRefill = !!C.FREESPINS.scatterInFreeSpins;
-      const rt = C.FREESPINS.retriggerByScatters || {};
-
       this.ui.showFreeSpins(total);
-      await LF.delay(900);
+      this.ui.setFSMultiplier(m);
+      await LF.delay(800);
 
       while (done < total && done < C.FREESPINS.maxSpins) {
         done++;
         this.ui.updateFreeSpins(done, total);
+        this.ui.setFSMultiplier(m);
 
         await this.grid.spawnAll();
-        const r = await this._resolveBoard(true);
+        const spinStartX = this._runningX;
+        const r = await this._resolveBoard(); // sammelt Basis-Win des Spins (zeigt mitlaufend)
+        const spinBaseX = this._runningX - spinStartX;
 
-        // Scatter-Retrigger: 2 Scatter -> +2, 3+ Scatter -> +4
-        let extra = r.scatters >= 3 ? (rt[3] || 0) : r.scatters >= 2 ? (rt[2] || 0) : 0;
-        if (extra > 0) {
-          total += extra;
-          this.ui.flashMessage("+" + extra + " FREE SPINS");
+        // Am Spin-Ende: Multi fliegt auf den Betrag, Betrag multipliziert sich.
+        if (spinBaseX > 0 && m > 1) {
+          const finalX = spinBaseX * m;
+          await this.ui.multiplyWin(spinBaseX * this.stake, m, finalX * this.stake);
+          this._runningX += (finalX - spinBaseX);
+          this.ui.setWin(this._runningX * this.stake);
+        }
+        if (spinBaseX > 0) { m = Math.min(mc.max || 100, m + (mc.perSpin || 1)); this.ui.setFSMultiplier(m); }
+
+        // Retrigger nur bei 3+ Scatter
+        if (r.scatters >= 3) {
+          const ex = rt[3] || 0;
+          total += ex;
+          this.ui.flashMessage("+" + ex + " FREE SPINS");
           this.ui.updateFreeSpins(done, total);
           await LF.delay(700);
         }

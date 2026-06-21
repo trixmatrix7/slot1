@@ -33,7 +33,7 @@
     cont.eventMode = "static";
     cont.cursor = "pointer";
     cont.hitArea = new PIXI.Circle(0, 0, r);
-    cont.on("pointertap", onTap);
+    cont.on("pointertap", () => { if (LF.sound) { LF.sound.unlock(); LF.sound.click(); } onTap(); });
     cont.on("pointerover", () => (cont.scale.set(1.05)));
     cont.on("pointerout", () => (cont.scale.set(1.0)));
     cont.on("pointerdown", () => (cont.scale.set(0.95)));
@@ -66,6 +66,7 @@
       this.onMenu = () => {};
       this.onBuyFeature = (scatters) => {};
       this.onToggleBoost = () => {};
+      this.onBuyBetChange = (dir) => {};
 
       this._spinIconRot = 0;
       this._spinning = false;
@@ -197,24 +198,17 @@
         bet: 676, betArrows: 788, spin: 851, auto: 917,
       };
 
-      // --- Control-Bar: definierte schwarze Box (leicht transparent) ---
-      // kurzer Verlauf als weicher oberer Übergang ...
-      const fade = this._vGradientSprite(W, 22, [
-        [0.0, "rgba(0,0,0,0.0)"],
-        [1.0, "rgba(0,0,0,0.55)"],
-      ]);
-      fade.position.set(0, H - BAR_H);
-      bar.addChild(fade);
-      // ... darunter die eigentliche schwarze Box
-      const box = new PIXI.Graphics();
-      box.beginFill(0x000000, 0.55);
-      box.drawRect(0, H - BAR_H + 20, W, BAR_H - 20);
-      box.endFill();
-      // dünne hellere Oberkante
-      box.beginFill(0xffffff, 0.06);
-      box.drawRect(0, H - BAR_H + 20, W, 2);
-      box.endFill();
-      bar.addChild(box);
+      // --- Control-Bar: kompakter abgerundeter Kasten um die Controls
+      //     (nicht mehr durchgezogen von ganz links nach ganz rechts) ---
+      const boxH = 84, boxX = 150, boxW = 900, boxY = yMid - boxH / 2;
+      const cbar = new PIXI.Graphics();
+      cbar.beginFill(0x000000, 0.30);
+      cbar.drawRoundedRect(boxX - 3, boxY + 5, boxW + 6, boxH, 20); cbar.endFill();      // Schatten
+      cbar.beginFill(0x0b1014, 0.80);
+      cbar.drawRoundedRect(boxX, boxY, boxW, boxH, 20); cbar.endFill();                  // Box
+      cbar.lineStyle(1.5, 0xffffff, 0.10);
+      cbar.drawRoundedRect(boxX, boxY, boxW, boxH, 20);                                  // feine Kante
+      bar.addChild(cbar);
 
       /* --- Bonus-Kauf (goldener Münz-Button) --- */
       const buy = roundButton(
@@ -456,6 +450,20 @@
       });
       this.multPopText.anchor.set(0.5); this.multPop.addChild(this.multPopText);
 
+      // --- Per-Spin-Multiply (FS): zentraler Betrag + "×m"-Token der drauf fliegt ---
+      this.spinWinText = new PIXI.Text("", {
+        fontFamily: "Arial Black, Arial", fontSize: 52, fontWeight: "900",
+        fill: 0xffffff, stroke: 0x14391a, strokeThickness: 6,
+      });
+      this.spinWinText.anchor.set(0.5); this.spinWinText.visible = false;
+      this.root.addChild(this.spinWinText);
+      this.multToken = new PIXI.Text("×2", {
+        fontFamily: "Arial Black, Arial", fontSize: 56, fontWeight: "900",
+        fill: 0xffd54f, stroke: 0x2a0f1a, strokeThickness: 7,
+      });
+      this.multToken.anchor.set(0.5); this.multToken.visible = false;
+      this.root.addChild(this.multToken);
+
       // Win-Anzeige (mittig über der Bar bei Gewinn)
       this.winBanner = new PIXI.Text("", {
         fontFamily: "Arial Black, Arial", fontSize: 30, fontWeight: "900",
@@ -475,6 +483,66 @@
       this.toast.position.set(C.DESIGN_W / 2, C.DESIGN_H / 2);
       this.toast.alpha = 0;
       this.root.addChild(this.toast);
+
+      // --- Win-Celebration (Superb/Sensational/Epic + hochzählender Betrag) ---
+      this.winLayer = new PIXI.Container();
+      this.winLayer.visible = false;
+      this.winLayer.position.set(C.DESIGN_W / 2, C.DESIGN_H / 2 - 8);
+      this.root.addChild(this.winLayer);
+      const wScrim = this._radialScrim(760, 440, 0.55);
+      this.winLayer.addChild(wScrim);
+      this.winTierText = new PIXI.Text("", {
+        fontFamily: "Arial Black, Arial", fontSize: 48, fontWeight: "900",
+        fill: 0xffd54f, stroke: 0x2a0f1a, strokeThickness: 7,
+      });
+      this.winTierText.anchor.set(0.5); this.winTierText.position.set(0, -66);
+      this.winLayer.addChild(this.winTierText);
+      this.winPill = new PIXI.Graphics();
+      this.winPill.position.set(0, 28);
+      this.winLayer.addChild(this.winPill);
+      this.winAmountText = new PIXI.Text("0,00$", {
+        fontFamily: "Arial Black, Arial", fontSize: 50, fontWeight: "900",
+        fill: 0xffffff, stroke: 0x14391a, strokeThickness: 6,
+      });
+      this.winAmountText.anchor.set(0.5); this.winAmountText.position.set(0, 28);
+      this.winLayer.addChild(this.winAmountText);
+    }
+
+    // Win-Celebration: Stufe nach Gewinn (× Einsatz), Betrag zählt hoch. -> Promise
+    async showWinCelebration(totalWin, winX) {
+      let tier = null, level = 2, color = 0x9ccc4a;
+      if (winX >= 120) { tier = "EPIC WIN"; level = 4; color = 0xff5da2; }
+      else if (winX >= 75) { tier = "SENSATIONAL"; level = 3; color = 0xffd54f; }
+      else if (winX >= 15) { tier = "SUPERB"; level = 2; color = 0x9ccc4a; }
+      else return;
+
+      this.winTierText.text = tier;
+      this.winTierText.style.fill = color;
+      this.winPill.clear();
+      this.winPill.beginFill(0x000000, 0.25); this.winPill.drawRoundedRect(-188, -25, 376, 96, 48); this.winPill.endFill();
+      this.winPill.lineStyle(4, 0xffffff, 0.9);
+      this.winPill.beginFill(0xe5208c); this.winPill.drawRoundedRect(-182, -28, 364, 88, 44); this.winPill.endFill();
+
+      this.winAmountText.text = LF.money(0);
+      this.winLayer.visible = true;
+      this.winLayer.alpha = 0;
+      this.winLayer.scale.set(0.7);
+      if (LF.sound) LF.sound.win(level);
+      await Promise.all([
+        LF.tween.to(this.winLayer, { alpha: 1 }, 200, LF.ease.outQuad),
+        LF.tween.to(this.winLayer.scale, { x: 1, y: 1 }, 280, LF.ease.outBack),
+      ]);
+      // hochzählen
+      const dur = 1100 + level * 350, steps = 48;
+      for (let i = 1; i <= steps; i++) {
+        const p = LF.ease.outQuad(i / steps);
+        this.winAmountText.text = LF.money(totalWin * p);
+        await LF.delay(dur / steps);
+      }
+      this.winAmountText.text = LF.money(totalWin);
+      await LF.delay(750);
+      await LF.tween.to(this.winLayer, { alpha: 0 }, 280, LF.ease.inQuad);
+      this.winLayer.visible = false;
     }
 
     /* =================== PUBLIC API (vom Engine genutzt) =================== */
@@ -545,6 +613,46 @@
       })();
     }
 
+    // FS-Spin-Ende: Betrag zeigen, "×m" fliegt aus der Box drauf, Betrag multipliziert sich. -> Promise
+    multiplyWin(baseAmount, mult, finalAmount) {
+      const cx = C.DESIGN_W / 2, cy = C.DESIGN_H / 2 + 8;
+      this.spinWinText.text = LF.money(baseAmount);
+      this.spinWinText.position.set(cx, cy);
+      this.spinWinText.alpha = 0; this.spinWinText.scale.set(0.8); this.spinWinText.visible = true;
+      this.multToken.text = "×" + mult;
+      this.multToken.position.set(this._multBoxPos.x, this._multBoxPos.y);
+      this.multToken.alpha = 0; this.multToken.scale.set(1); this.multToken.visible = true;
+      LF.tween.killOf(this.spinWinText); LF.tween.killOf(this.spinWinText.scale);
+      LF.tween.killOf(this.multToken); LF.tween.killOf(this.multToken.position); LF.tween.killOf(this.multToken.scale);
+      return (async () => {
+        await Promise.all([
+          LF.tween.to(this.spinWinText, { alpha: 1 }, 150, LF.ease.outQuad),
+          LF.tween.to(this.spinWinText.scale, { x: 1, y: 1 }, 200, LF.ease.outBack),
+        ]);
+        await LF.delay(160);
+        // "×m" fliegt von der Box auf den Betrag
+        this.multToken.alpha = 1;
+        await Promise.all([
+          LF.tween.to(this.multToken.position, { x: cx, y: cy }, 320, LF.ease.inQuad),
+          LF.tween.to(this.multToken.scale, { x: 1.4, y: 1.4 }, 320, LF.ease.inQuad),
+        ]);
+        this.multToken.alpha = 0;
+        if (LF.sound) LF.sound.win(2);
+        // Betrag zählt hoch auf finalen Wert + Pop
+        this.spinWinText.scale.set(1.32);
+        LF.tween.to(this.spinWinText.scale, { x: 1, y: 1 }, 240, LF.ease.outBack);
+        const steps = 22;
+        for (let i = 1; i <= steps; i++) {
+          this.spinWinText.text = LF.money(baseAmount + (finalAmount - baseAmount) * (i / steps));
+          await LF.delay(14);
+        }
+        this.spinWinText.text = LF.money(finalAmount);
+        await LF.delay(420);
+        await LF.tween.to(this.spinWinText, { alpha: 0 }, 200, LF.ease.inQuad);
+        this.spinWinText.visible = false; this.multToken.visible = false;
+      })();
+    }
+
     flashMessage(msg) {
       this.toast.text = msg;
       LF.tween.killOf(this.toast);
@@ -561,6 +669,93 @@
       this.overlay.removeChildren();
     }
 
+    /* =================== SETTINGS-MENÜ (linkes Panel) =================== */
+    closeSettings() {
+      this.overlay.visible = false;
+      this.overlay.removeChildren();
+    }
+
+    _setSpeed(level) {
+      this._turboLevel = (this._turboLevel === level) ? 0 : level;
+      LF.speed = this._turboLevel === 2 ? 0.3 : this._turboLevel === 1 ? 0.55 : 1;
+    }
+
+    openSettingsMenu() {
+      const o = this.overlay;
+      o.removeChildren(); o.visible = true;
+      const H = C.DESIGN_H;
+
+      const dim = new PIXI.Graphics();
+      dim.beginFill(0x000000, 0.5); dim.drawRect(0, 0, C.DESIGN_W, H); dim.endFill();
+      dim.eventMode = "static"; dim.on("pointertap", () => this.closeSettings());
+      o.addChild(dim);
+
+      const px = 26, pw = 300, ph = H - 150, py = (H - ph) / 2;
+      const panel = new PIXI.Graphics();
+      panel.beginFill(0x000000, 0.35); panel.drawRoundedRect(px - 3, py + 5, pw + 6, ph, 18); panel.endFill();
+      panel.beginFill(0x12181e, 0.98); panel.drawRoundedRect(px, py, pw, ph, 18); panel.endFill();
+      panel.lineStyle(1.5, 0xffffff, 0.10); panel.drawRoundedRect(px, py, pw, ph, 18);
+      o.addChild(panel);
+
+      const title = new PIXI.Text("MENÜ", {
+        fontFamily: "Arial Black, Arial", fontSize: 18, fontWeight: "900", fill: 0xffffff, letterSpacing: 2,
+      });
+      title.anchor.set(0.5); title.position.set(px + pw / 2, py + 26); o.addChild(title);
+
+      const rows = [
+        { label: "TON", type: "toggle", get: () => LF.sound.enabled, set: (v) => LF.sound.setEnabled(v) },
+        { label: "MUSIK", type: "toggle", get: () => LF.sound.musicEnabled, set: (v) => LF.sound.setMusic(v) },
+        { label: "SUPER TURBO", type: "speed", level: 2 },
+        { label: "TURBO", type: "speed", level: 1 },
+        { label: "VERLAUF", type: "action", act: () => this.flashMessage("Verlauf — folgt") },
+        { label: "INFO", type: "action", act: () => this.flashMessage("Info — folgt") },
+        { label: "HEIM", type: "action", act: () => { this.closeSettings(); location.reload(); } },
+      ];
+
+      const rowH = 54, startY = py + 56;
+      rows.forEach((row, i) => {
+        const ry = startY + i * rowH;
+        const active = row.type === "speed" && (this._turboLevel || 0) === row.level;
+        const on = row.type === "toggle" ? row.get() : false;
+
+        const rb = rectButton(px + 14, ry, pw - 28, rowH - 8, () => {
+          if (LF.sound) { LF.sound.unlock(); LF.sound.toggle(); }
+          if (row.type === "toggle") row.set(!row.get());
+          else if (row.type === "speed") this._setSpeed(row.level);
+          else { row.act(); return; }
+          this.openSettingsMenu(); // neu rendern (Status)
+        });
+        const g = new PIXI.Graphics();
+        g.beginFill(0xffffff, active || on ? 0.10 : 0.04);
+        g.drawRoundedRect(0, 0, pw - 28, rowH - 8, 10); g.endFill();
+        g.beginFill(active ? 0xffd54f : 0x3a4148); g.drawRoundedRect(0, 0, 4, rowH - 8, 2); g.endFill();
+        rb.addChild(g);
+        const lbl = new PIXI.Text(row.label, {
+          fontFamily: "Arial Black, Arial", fontSize: 15, fontWeight: "900", fill: 0xeef3f6,
+        });
+        lbl.anchor.set(0, 0.5); lbl.position.set(20, (rowH - 8) / 2); rb.addChild(lbl);
+
+        const stateTxt =
+          row.type === "toggle" ? (on ? "AN" : "AUS") :
+          row.type === "speed" ? (active ? "AN" : "AUS") : "›";
+        const st = new PIXI.Text(stateTxt, {
+          fontFamily: "Arial Black, Arial", fontSize: 13, fontWeight: "900",
+          fill: (on || active) ? 0x9ccc4a : 0x7a8690,
+        });
+        st.anchor.set(1, 0.5); st.position.set(pw - 28 - 16, (rowH - 8) / 2); rb.addChild(st);
+        o.addChild(rb);
+      });
+
+      // Schließen-X oben rechts am Panel
+      const close = roundButton(px + pw - 20, py + 26, 16,
+        (g) => {
+          g.beginFill(0x2a3138); g.drawCircle(0, 0, 16); g.endFill();
+          g.lineStyle({ width: 3, color: 0xffffff, cap: "round" });
+          g.moveTo(-5, -5); g.lineTo(5, 5); g.moveTo(5, -5); g.lineTo(-5, 5);
+        }, () => this.closeSettings());
+      o.addChild(close);
+    }
+
     // Buy-Menü mit 3 Cards (3 Scatter / 4 Scatter / Boost)
     openBuyMenu(state) {
       this._buyState = state;
@@ -571,91 +766,111 @@
       const s = this._buyState; if (!s) return;
       const o = this.overlay;
       o.removeChildren(); o.visible = true;
-      const W = C.DESIGN_W, H = C.DESIGN_H, cx = W / 2, cy = H / 2;
+      const W = C.DESIGN_W, H = C.DESIGN_H, cx = W / 2;
 
       const dim = new PIXI.Graphics();
-      dim.beginFill(0x000000, 0.72); dim.drawRect(0, 0, W, H); dim.endFill();
+      dim.beginFill(0x000000, 0.80); dim.drawRect(0, 0, W, H); dim.endFill();
       dim.eventMode = "static";
       o.addChild(dim);
 
-      const pw = 880, ph = 410;
-      const panel = new PIXI.Graphics();
-      panel.lineStyle(3, 0xffffff, 0.12);
-      panel.beginFill(0x12181e, 0.98);
-      panel.drawRoundedRect(cx - pw / 2, cy - ph / 2, pw, ph, 20);
-      panel.endFill();
-      o.addChild(panel);
-
-      const title = new PIXI.Text("FEATURE KAUFEN", {
-        fontFamily: "Arial Black, Arial", fontSize: 26, fontWeight: "900", fill: 0xffffff,
+      const title = new PIXI.Text("BONUSKAUF", {
+        fontFamily: "Arial Black, Arial", fontSize: 24, fontWeight: "900", fill: 0xffffff, letterSpacing: 3,
       });
-      title.anchor.set(0.5); title.position.set(cx, cy - ph / 2 + 34); o.addChild(title);
+      title.anchor.set(0.5); title.position.set(cx, 38); o.addChild(title);
 
-      const close = roundButton(cx + pw / 2 - 26, cy - ph / 2 + 26, 18,
-        (g) => {
-          g.beginFill(0x2a3138); g.drawCircle(0, 0, 18); g.endFill();
-          g.lineStyle({ width: 3, color: 0xffffff, cap: "round" });
-          g.moveTo(-6, -6); g.lineTo(6, 6); g.moveTo(6, -6); g.lineTo(-6, 6);
-        },
+      const close = roundButton(W - 42, 36, 18,
+        (g) => { g.beginFill(0x2a3138); g.drawCircle(0, 0, 18); g.endFill(); g.lineStyle({ width: 3, color: 0xffffff, cap: "round" }); g.moveTo(-6, -6); g.lineTo(6, 6); g.moveTo(6, -6); g.lineTo(-6, 6); },
         () => this.closeBuyMenu());
       o.addChild(close);
 
-      // labeled rect button
-      const mkBtn = (bx, by, bw, bh, label, color, onTap) => {
-        const c = rectButton(bx - bw / 2, by - bh / 2, bw, bh, onTap);
-        const g = new PIXI.Graphics();
-        g.beginFill(color); g.drawRoundedRect(0, 0, bw, bh, 10); g.endFill();
-        c.addChild(g);
-        const t = new PIXI.Text(label, {
-          fontFamily: "Arial Black, Arial", fontSize: 15, fontWeight: "900", fill: 0xffffff,
-          align: "center", lineHeight: 17,
-        });
-        t.anchor.set(0.5); t.position.set(bw / 2, bh / 2); c.addChild(t);
-        c.cursor = "pointer";
-        c.on("pointerover", () => (g.alpha = 0.85));
-        c.on("pointerout", () => (g.alpha = 1));
-        return c;
+      // EINSATZ-Stepper (weiße Box oben mittig)
+      const sbW = 244, sbH = 76, sbX = cx - sbW / 2, sbY = 70;
+      const sbox = new PIXI.Graphics();
+      sbox.beginFill(0x000000, 0.25); sbox.drawRoundedRect(sbX - 2, sbY + 3, sbW + 4, sbH, 10); sbox.endFill();
+      sbox.beginFill(0xffffff); sbox.drawRoundedRect(sbX, sbY, sbW, sbH, 10); sbox.endFill();
+      o.addChild(sbox);
+      const elbl = new PIXI.Text("EINSATZ", { fontFamily: "Arial", fontSize: 12, fontWeight: "700", fill: 0x6a7178, letterSpacing: 1 });
+      elbl.anchor.set(0.5); elbl.position.set(cx, sbY + 16); o.addChild(elbl);
+      const eVal = new PIXI.Text(LF.money(s.bet), { fontFamily: "Arial Black, Arial", fontSize: 22, fontWeight: "900", fill: 0x14181c });
+      eVal.anchor.set(0.5); eVal.position.set(cx, sbY + 46); o.addChild(eVal);
+      const stepBtn = (bx, isPlus) => {
+        const b = roundButton(bx, sbY + 44, 20,
+          (g) => { g.beginFill(0x222831); g.drawRoundedRect(-22, -17, 44, 34, 8); g.endFill(); g.lineStyle({ width: 3, color: 0xffffff, cap: "round" }); g.moveTo(-8, 0); g.lineTo(8, 0); if (isPlus) { g.moveTo(0, -8); g.lineTo(0, 8); } },
+          () => this.onBuyBetChange(isPlus ? 1 : -1));
+        b.hitArea = new PIXI.Rectangle(-22, -17, 44, 34);
+        return b;
       };
+      o.addChild(stepBtn(sbX + 34, false));
+      o.addChild(stepBtn(sbX + sbW - 34, true));
 
-      const cardW = 250, cardH = 290, gap = 20;
+      // 3 weiße Cards
+      const cardW = 250, cardH = 332, gap = 26;
       const totalW = cardW * 3 + gap * 2;
-      const startX = cx - totalW / 2;
-      const cardTop = cy - ph / 2 + 64;
+      const startX = cx - totalW / 2, top = 176;
       const centers = [0, 1, 2].map((i) => startX + cardW / 2 + i * (cardW + gap));
-
-      const drawCard = (cxc, accent) => {
-        const card = new PIXI.Graphics();
-        card.lineStyle(2.5, accent, 0.9);
-        card.beginFill(0x1b2530, 1);
-        card.drawRoundedRect(cxc - cardW / 2, cardTop, cardW, cardH, 14);
-        card.endFill();
-        o.addChild(card);
-      };
-
       const f3 = s.features[3], f4 = s.features[4];
-      const spins3 = C.FREESPINS.trigger[3] || 10, spins4 = C.FREESPINS.trigger[4] || 15;
+      const sp3 = C.FREESPINS.trigger[3] || 10, sp4 = C.FREESPINS.trigger[4] || 15;
 
-      drawCard(centers[0], 0xff7a2f);
-      this._cardContent(centers[0], cardTop, cardH, "3 SCATTER", spins3 + " FREISPIELE", "Standard-Feature", 0xff7a2f);
-      o.addChild(mkBtn(centers[0], cardTop + cardH - 34, cardW - 40, 44, "KAUFEN\n" + LF.money(f3.cost * s.bet), 0x2e9e4a, () => this.onBuyFeature(3)));
-
-      drawCard(centers[1], 0xffd54f);
-      this._cardContent(centers[1], cardTop, cardH, "4 SCATTER", spins4 + " FREISPIELE", "Mehr Spins", 0xffd54f);
-      o.addChild(mkBtn(centers[1], cardTop + cardH - 34, cardW - 40, 44, "KAUFEN\n" + LF.money(f4.cost * s.bet), 0x2e9e4a, () => this.onBuyFeature(4)));
-
-      drawCard(centers[2], 0xe5208c);
-      this._cardContent(centers[2], cardTop, cardH, "BOOST", "3× SCATTER-CHANCE", "Einsatz ×3 pro Spin", 0xe5208c);
-      o.addChild(mkBtn(centers[2], cardTop + cardH - 34, cardW - 40, 44, s.boostActive ? "AKTIV ✓" : "AKTIVIEREN", s.boostActive ? 0xe5208c : 0x3a4148, () => this.onToggleBoost()));
+      this._buyCard(centers[0], top, cardW, cardH, {
+        accent: 0xff7a2f, title: "3 SCATTER", desc: sp3 + " Freispiele\nStandard-Feature",
+        icon: "SC", iconBadge: "3", vola: "Volatilität: Hoch", price: LF.money(f3.cost * s.bet),
+        btn: "KAUFE", btnColor: 0x2e9e4a, onTap: () => this.onBuyFeature(3),
+      });
+      this._buyCard(centers[1], top, cardW, cardH, {
+        accent: 0xffc02e, title: "4 SCATTER", desc: sp4 + " Freispiele\nMehr Spins",
+        icon: "SC", iconBadge: "4", vola: "Volatilität: Sehr hoch", price: LF.money(f4.cost * s.bet),
+        btn: "KAUFE", btnColor: 0x2e9e4a, onTap: () => this.onBuyFeature(4),
+      });
+      this._buyCard(centers[2], top, cardW, cardH, {
+        accent: 0xe5208c, title: "3× CHANCE", desc: "3× Scatter-Chance\nEinsatz ×3 pro Spin",
+        iconText: "×3", vola: "Boost-Modus", price: s.boostActive ? "AKTIV" : "An / Aus",
+        btn: s.boostActive ? "AKTIV ✓" : "AKTIVIEREN", btnColor: s.boostActive ? 0x2e9e4a : 0xe5722f, onTap: () => this.onToggleBoost(),
+      });
     }
 
-    _cardContent(cxc, top, h, title, big, sub, accent) {
+    _buyCard(cx, top, w, h, opt) {
       const o = this.overlay;
-      const t = new PIXI.Text(title, { fontFamily: "Arial Black, Arial", fontSize: 20, fontWeight: "900", fill: accent });
-      t.anchor.set(0.5); t.position.set(cxc, top + 36); o.addChild(t);
-      const b = new PIXI.Text(big, { fontFamily: "Arial Black, Arial", fontSize: 18, fontWeight: "900", fill: 0xffffff, align: "center" });
-      b.anchor.set(0.5); b.position.set(cxc, top + h / 2 - 14); o.addChild(b);
-      const sb = new PIXI.Text(sub, { fontFamily: "Arial", fontSize: 13, fill: 0xbcd0c2, align: "center" });
-      sb.anchor.set(0.5); sb.position.set(cxc, top + h / 2 + 16); o.addChild(sb);
+      const x = cx - w / 2;
+      const card = new PIXI.Graphics();
+      card.beginFill(0x000000, 0.25); card.drawRoundedRect(x - 2, top + 4, w + 4, h, 14); card.endFill();
+      card.beginFill(0xf3f4f6); card.drawRoundedRect(x, top, w, h, 14); card.endFill();
+      card.beginFill(opt.accent); card.drawRoundedRect(x, top, w, 6, 0); card.endFill();
+      o.addChild(card);
+
+      const t = new PIXI.Text(opt.title, { fontFamily: "Arial Black, Arial", fontSize: 18, fontWeight: "900", fill: 0x16191d });
+      t.anchor.set(0.5); t.position.set(cx, top + 34); o.addChild(t);
+
+      const d = new PIXI.Text(opt.desc, { fontFamily: "Arial", fontSize: 12, fill: 0x5a6168, align: "center", lineHeight: 16 });
+      d.anchor.set(0.5); d.position.set(cx, top + 68); o.addChild(d);
+
+      const iconY = top + 142;
+      if (opt.icon && LF.textures && LF.textures[opt.icon]) {
+        const sp = new PIXI.Sprite(LF.textures[opt.icon]);
+        sp.anchor.set(0.5); sp.width = sp.height = 80; sp.position.set(cx, iconY); o.addChild(sp);
+        if (opt.iconBadge) {
+          const bg = new PIXI.Graphics(); bg.lineStyle(2, 0xffffff, 1); bg.beginFill(opt.accent); bg.drawCircle(cx + 32, iconY - 30, 15); bg.endFill(); o.addChild(bg);
+          const bt = new PIXI.Text(opt.iconBadge, { fontFamily: "Arial Black", fontSize: 15, fontWeight: "900", fill: 0x2a1500 });
+          bt.anchor.set(0.5); bt.position.set(cx + 32, iconY - 30); o.addChild(bt);
+        }
+      } else {
+        const ic = new PIXI.Graphics(); ic.lineStyle(3, opt.accent, 1); ic.beginFill(0xffffff); ic.drawRoundedRect(cx - 42, iconY - 42, 84, 84, 16); ic.endFill(); o.addChild(ic);
+        const it = new PIXI.Text(opt.iconText || "", { fontFamily: "Arial Black", fontSize: 32, fontWeight: "900", fill: opt.accent });
+        it.anchor.set(0.5); it.position.set(cx, iconY); o.addChild(it);
+      }
+
+      const vola = new PIXI.Text(opt.vola, { fontFamily: "Arial", fontSize: 11, fill: 0x8a9098 });
+      vola.anchor.set(0.5); vola.position.set(cx, top + 212); o.addChild(vola);
+
+      const price = new PIXI.Text(opt.price, { fontFamily: "Arial Black, Arial", fontSize: 22, fontWeight: "900", fill: 0x16191d });
+      price.anchor.set(0.5); price.position.set(cx, top + 242); o.addChild(price);
+
+      const bw = w - 32, bh = 46, by = top + h - 30;
+      const btn = rectButton(cx - bw / 2, by - bh / 2, bw, bh, opt.onTap);
+      const bg = new PIXI.Graphics(); bg.beginFill(opt.btnColor); bg.drawRoundedRect(0, 0, bw, bh, 8); bg.endFill(); btn.addChild(bg);
+      const bt = new PIXI.Text(opt.btn, { fontFamily: "Arial Black, Arial", fontSize: 16, fontWeight: "900", fill: 0xffffff });
+      bt.anchor.set(0.5); bt.position.set(bw / 2, bh / 2); btn.addChild(bt);
+      btn.cursor = "pointer"; btn.on("pointerover", () => (bg.alpha = 0.88)); btn.on("pointerout", () => (bg.alpha = 1));
+      o.addChild(btn);
     }
 
     // Feature-Ende-Screen -> Promise (löst nach Tap/Timeout)
@@ -686,6 +901,48 @@
         const close = () => { o.visible = false; o.removeChildren(); resolve(); };
         dim.on("pointertap", close);
         LF.delay(3500).then(() => { if (o.visible) close(); });
+      });
+    }
+
+    // Free-Games-Intro mit START-Button -> Promise (löst bei START)
+    showFreeSpinsIntro(award) {
+      return new Promise((resolve) => {
+        const o = this.overlay;
+        o.removeChildren(); o.visible = true;
+        const cx = C.DESIGN_W / 2, cy = C.DESIGN_H / 2;
+
+        const dim = new PIXI.Graphics();
+        dim.beginFill(0x000000, 0.80); dim.drawRect(0, 0, C.DESIGN_W, C.DESIGN_H); dim.endFill();
+        dim.eventMode = "static";
+        o.addChild(dim);
+        const scrim = this._radialScrim(720, 440, 0.5); scrim.position.set(cx, cy - 16); o.addChild(scrim);
+
+        const t1 = new PIXI.Text("FREE SPINS", {
+          fontFamily: "Arial Black, Arial", fontSize: 54, fontWeight: "900", fill: 0xffd54f, stroke: 0x2a0f1a, strokeThickness: 8,
+        });
+        t1.anchor.set(0.5); t1.position.set(cx, cy - 92); o.addChild(t1);
+
+        const t2 = new PIXI.Text(award + " FREISPIELE", {
+          fontFamily: "Arial Black, Arial", fontSize: 30, fontWeight: "900", fill: 0xffffff,
+        });
+        t2.anchor.set(0.5); t2.position.set(cx, cy - 32); o.addChild(t2);
+
+        const bw = 248, bh = 68;
+        const btn = rectButton(cx - bw / 2, cy + 28, bw, bh, () => {
+          if (LF.sound) { LF.sound.unlock(); LF.sound.win(2); }
+          o.visible = false; o.removeChildren(); resolve();
+        });
+        const bg = new PIXI.Graphics();
+        bg.beginFill(0x000000, 0.25); bg.drawRoundedRect(-3, 5, bw + 6, bh, 16); bg.endFill();
+        bg.beginFill(0x2e9e4a); bg.drawRoundedRect(0, 0, bw, bh, 16); bg.endFill();
+        btn.addChild(bg);
+        const bt = new PIXI.Text("START", {
+          fontFamily: "Arial Black, Arial", fontSize: 26, fontWeight: "900", fill: 0xffffff, letterSpacing: 3,
+        });
+        bt.anchor.set(0.5); bt.position.set(bw / 2, bh / 2); btn.addChild(bt);
+        btn.cursor = "pointer";
+        btn.on("pointerover", () => (bg.alpha = 0.9)); btn.on("pointerout", () => (bg.alpha = 1));
+        o.addChild(btn);
       });
     }
 

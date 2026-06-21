@@ -35,15 +35,25 @@
   ui.onBuy = () => engine.openBuyMenu();
   ui.onBuyFeature = (scatters) => engine.buyFeature(scatters);
   ui.onToggleBoost = () => engine.toggleBoost();
+  ui.onBuyBetChange = (dir) => { engine.changeBet(dir); engine.openBuyMenu(); };
   ui.onAutoplay = () => engine.toggleAutoplay();
-  ui.onMenu = () => ui.flashMessage("Menü (Platzhalter)");
+  ui.onMenu = () => ui.openSettingsMenu();
 
   // --- Ticker: Tweens + UI-Animation ---
   app.ticker.add(() => {
-    const dt = app.ticker.deltaMS;
+    // dt klemmen: bei Frame-Drops/Last springen die Tweens/Frame-Stepper sonst (Ruckeln).
+    const dt = Math.min(app.ticker.deltaMS, 50);
     LF.tween.update(dt);
     ui.update(dt);
   });
+
+  // --- Sicherheitsnetz: unbehandelte Promise-Fehler sichtbar loggen (statt still schlucken) ---
+  window.addEventListener("unhandledrejection", (e) => { console.error("unhandledrejection:", e.reason); });
+
+  // --- Audio bei erster User-Geste freischalten (Browser-Policy) ---
+  const unlockAudio = () => { if (LF.sound) LF.sound.unlock(); };
+  window.addEventListener("pointerdown", unlockAudio);
+  window.addEventListener("keydown", unlockAudio);
 
   // --- Tastatur: Leertaste = Spin ---
   window.addEventListener("keydown", (e) => {
@@ -73,28 +83,20 @@
   window.addEventListener("resize", resize);
   resize();
 
-  // --- Lade-Hinweis, dann Symbole laden, dann Startboard ---
-  const loading = new PIXI.Text("LADE SYMBOLE …", {
-    fontFamily: "Arial Black, Arial", fontSize: 24, fontWeight: "900",
-    fill: 0xffffff, stroke: 0x000000, strokeThickness: 5,
-  });
-  loading.anchor.set(0.5);
-  loading.position.set(C.DESIGN_W / 2, C.DESIGN_H / 2);
-  ui.root.addChild(loading);
-
+  // --- Intro: Loading-Screen -> Splash -> Klick -> Ingame ---
+  const intro = new LF.Intro(app);
   (async () => {
     try {
-      await LF.loadAssets();
+      await Promise.all([LF.loadAssets(), intro.playLoading()]);
     } catch (e) {
-      loading.text = "FEHLER: Bilder nicht geladen.\nBitte über http://localhost:8080 starten.";
-      loading.style.fontSize = 18;
+      intro.showError("Bilder nicht geladen — bitte über http://localhost:8080 starten.");
       return;
     }
-    ui.root.removeChild(loading);
-    loading.destroy();
-    grid.spawnAll();
+    await intro.showSplash();          // wartet auf Klick (schaltet Audio frei)
+    await intro.finish();              // Intro ausblenden
+    grid.spawnAll(false);              // Startboard (ohne Anticipation/Sirene)
   })();
 
   // Für Debug/Konsole
-  window.GAME = { app, grid, ui, engine, LF };
+  window.GAME = { app, grid, ui, engine, intro, LF };
 })();

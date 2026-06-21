@@ -75,8 +75,14 @@
 
   /* ---------- Flaches Modell (Simulator) ---------- */
   function fillArr(rng, n) {
+    const cap = LF.CONFIG.MAX_SCATTERS || 4;
     const a = new Array(n);
-    for (let i = 0; i < n; i++) a[i] = M.pick(rng).id;
+    let sc = 0;
+    for (let i = 0; i < n; i++) {
+      let s = M.pick(rng);
+      if (s.kind === "scatter") { if (sc >= cap) s = M.pickNoSc(rng); else sc++; }
+      a[i] = s.id;
+    }
     return a;
   }
   // Ein frisches Board als flaches Array (für Simulator-Detailstatistik).
@@ -101,38 +107,42 @@
 
   // Ein Board komplett auswerten (Tumble-Schleife). multState trägt den
   // FS-Multiplikator über das ganze Feature. Liefert { winX, scatters }.
-  M.resolveArr = function (rng, arr, isFS, multState) {
+  // Liefert den BASIS-Win des Spins (ohne FS-Multiplikator) + Scatter (capped).
+  // Der FS-Multiplikator wird in runFreeSpins am Spin-ENDE angewandt.
+  M.resolveArr = function (rng, arr, isFS) {
     const ID = LF.SYMBOL_BY_ID;
     const C = LF.CONFIG;
+    const cap = C.MAX_SCATTERS || 4;
+    const allowSc = isFS && C.FREESPINS.scatterInFreeSpins;
     let winX = 0;
     for (;;) {
       const { m, wild } = arrCounts(arr);
-      const { totalX, winning } = M.countWins(m, wild);
-      if (totalX <= 0) break;
-      const mult = isFS ? multState.m : 1;
-      winX += totalX * mult;
-      // Gewinner-Symbole + Wilds entfernen und neu auffüllen. In FS (scatterInFreeSpins)
-      // dürfen Scatter reindroppen; im Basisspiel Nachschub ohne Scatter.
-      const refill = (isFS && C.FREESPINS.scatterInFreeSpins) ? M.pick : M.pickNoSc;
+      // NUR EIN Gewinn-Typ pro Tumble (erste in Symbol-Reihenfolge: K, Q, J, ...).
+      let winId = null, x = 0;
+      for (const sym of C.SYMBOLS) {
+        if (sym.kind === "wild" || sym.kind === "scatter") continue;
+        const cnt = m[sym.id] || 0;
+        if (!cnt) continue;
+        const p = M.payX(sym, cnt + wild);
+        if (p > 0) { winId = sym.id; x = p; break; }
+      }
+      if (!winId) break;
+      winX += x;
+      // nur diesen Typ (+ Wilds) entfernen und auffüllen; Scatter nur in FS und max cap
+      let sc = countScatters(arr);
       for (let i = 0; i < arr.length; i++) {
         const id = arr[i];
         if (id === "SC") continue;
         const def = ID[id];
-        if (def.kind === "wild" || winning.has(id)) arr[i] = refill(rng).id;
-      }
-      if (isFS) {
-        const mc = C.FREESPINS.multiplier;
-        if (mc.factor && mc.factor > 1) {
-          // multiplikativ (exponentieller Tail -> echte 10.000×-Reichweite)
-          multState.m = Math.min(mc.max, multState.m * mc.factor);
-        } else {
-          // additiv (mit optionaler Beschleunigung)
-          multState.m = Math.min(mc.max, multState.m + multState.step);
-          multState.step += mc.accel || 0;
+        if (def.kind === "wild" || id === winId) {
+          let nid;
+          if (allowSc && sc < cap) { nid = M.pick(rng).id; if (nid === "SC") sc++; }
+          else nid = M.pickNoSc(rng).id;
+          arr[i] = nid;
         }
       }
     }
-    return { winX, scatters: countScatters(arr) };
+    return { winX, scatters: Math.min(countScatters(arr), cap) };
   };
 
   M.triggerAward = function (scatters) {
@@ -144,17 +154,18 @@
 
   M.runFreeSpins = function (rng, award) {
     const C = LF.CONFIG;
-    const maxSpins = C.FREESPINS.maxSpins || 2000; // Sicherheits-Cap gegen Endlos-Retrigger
-    let left = award, fsWin = 0, done = 0;
-    const multState = { m: C.FREESPINS.multiplier.start, step: C.FREESPINS.multiplier.step };
+    const mc = C.FREESPINS.multiplier;
     const rt = C.FREESPINS.retriggerByScatters || {};
+    const maxSpins = C.FREESPINS.maxSpins || 400;
+    let left = award, fsWin = 0, done = 0;
+    let m = mc.start || 1; // Per-Spin-Multiplikator, wächst pro gewonnenem Spin
     while (left > 0 && done < maxSpins) {
       left--; done++;
       const arr = fillArr(rng, C.COLS * C.ROWS);
-      const r = M.resolveArr(rng, arr, true, multState);
-      fsWin += r.winX;
-      // 2 Scatter -> +2, 3+ Scatter -> +4
-      left += r.scatters >= 3 ? (rt[3] || 0) : r.scatters >= 2 ? (rt[2] || 0) : 0;
+      const r = M.resolveArr(rng, arr, true);
+      fsWin += r.winX * m;                                   // Spin-Win × aktueller Multi
+      if (r.winX > 0) m = Math.min(mc.max || 100, m + (mc.perSpin || 1));
+      if (r.scatters >= 3) left += (rt[3] || 0);             // Retrigger nur 3+
     }
     return fsWin;
   };
@@ -164,7 +175,7 @@
   M.playSpinX = function (rng) {
     const C = LF.CONFIG;
     const arr = fillArr(rng, C.COLS * C.ROWS);
-    const base = M.resolveArr(rng, arr, false, null);
+    const base = M.resolveArr(rng, arr, false);
     let total = base.winX;
     if (base.scatters >= 3) total += M.runFreeSpins(rng, M.triggerAward(base.scatters));
     return Math.min(total, C.MAX_WIN_X);
@@ -193,15 +204,22 @@
         else { m[id] = (m[id] || 0) + 1; (symCells[id] || (symCells[id] = [])).push([c, r]); }
       }
     }
-    const { totalX, winning } = M.countWins(m, wild);
+    // NUR EIN Gewinn-Typ pro Schritt (erste in Symbol-Reihenfolge) -> sequentieller Flow.
     const remove = [];
     const wins = [];
-    if (winning.size) {
-      winning.forEach((id) => {
-        for (const cell of symCells[id]) remove.push(cell);
-        wins.push({ id, count: m[id] + wild, x: M.payX(ID[id], m[id] + wild) });
-      });
-      for (const cell of wildCells) remove.push(cell);
+    let totalX = 0;
+    for (const sym of LF.CONFIG.SYMBOLS) {
+      if (sym.kind === "wild" || sym.kind === "scatter") continue;
+      const cnt = m[sym.id] || 0;
+      if (!cnt) continue;
+      const x = M.payX(sym, cnt + wild);
+      if (x > 0) {
+        totalX = x;
+        for (const cell of symCells[sym.id]) remove.push(cell);
+        for (const cell of wildCells) remove.push(cell);
+        wins.push({ id: sym.id, count: cnt + wild, x });
+        break;
+      }
     }
     return { wins, totalX, remove, scatters };
   };
