@@ -151,6 +151,21 @@
     return cv;
   };
 
+  // Hat das Bild bereits einen transparenten Hintergrund? (Ecken alpha≈0)
+  // -> dann NICHT keyen, sonst frisst der Flood-Fill (bg≈schwarz aus den
+  // transparenten Ecken) die dunklen Outlines weg (Symbol wirkt weiß/ausgewaschen).
+  LF.isTransparentBg = function (img) {
+    const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+    const cv = document.createElement("canvas");
+    cv.width = w; cv.height = h;
+    const ctx = cv.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0);
+    const pts = [[1, 1], [w - 2, 1], [1, h - 2], [w - 2, h - 2]];
+    let t = 0;
+    for (const [x, y] of pts) if (ctx.getImageData(x, y, 1, 1).data[3] < 16) t++;
+    return t >= 3;
+  };
+
   LF.loadAssets = async function () {
     const C = LF.CONFIG;
     await Promise.all(
@@ -161,8 +176,9 @@
             img.crossOrigin = "anonymous";
             img.onload = () => {
               try {
-                const cv = LF.keyOutBackground(img);
-                LF.textures[s.id] = PIXI.Texture.from(cv);
+                // Bereits transparente Exporte direkt nutzen; nur deckende Hintergründe keyen.
+                const src = LF.isTransparentBg(img) ? img : LF.keyOutBackground(img);
+                LF.textures[s.id] = PIXI.Texture.from(src);
                 resolve();
               } catch (e) { reject(e); }
             };

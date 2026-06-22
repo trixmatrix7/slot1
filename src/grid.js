@@ -547,7 +547,7 @@
             (async () => {
               await LF.delay((row - rr) * 25);
               await LF.tween.to(sp.position, { y }, C.TIMING.tumbleDrop, LF.ease.outBack);
-              sp.playLanding(); // Landing-Anim für nachgerutschte/neue Symbole
+              // KEIN Landing beim Nachdroppen (Tumble) -> Landing nur beim ersten Board-Drop.
             })()
           );
           spawnAbove++;
