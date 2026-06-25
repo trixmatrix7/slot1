@@ -5,6 +5,46 @@
   const LF = (window.LF = window.LF || {});
   const C = LF.CONFIG;
 
+  /* ---- gecachte Win-Texturen (warmes Glow-Flare + Schockwellen-Ring) ---- */
+  let _glowTex = null, _ringTex = null;
+  function glowTex() {
+    if (_glowTex) return _glowTex;
+    const s = 256, cv = document.createElement("canvas"); cv.width = cv.height = s;
+    const ctx = cv.getContext("2d");
+    const g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+    g.addColorStop(0, "rgba(255,208,112,0.92)");
+    g.addColorStop(0.4, "rgba(255,168,66,0.46)");
+    g.addColorStop(0.75, "rgba(238,134,44,0.14)");
+    g.addColorStop(1, "rgba(238,134,44,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, s, s);
+    _glowTex = PIXI.Texture.from(cv); return _glowTex;
+  }
+  function ringTex() {
+    if (_ringTex) return _ringTex;
+    const s = 256, cv = document.createElement("canvas"); cv.width = cv.height = s;
+    const ctx = cv.getContext("2d");
+    const g = ctx.createRadialGradient(s / 2, s / 2, s * 0.30, s / 2, s / 2, s * 0.5);
+    g.addColorStop(0, "rgba(255,240,200,0)");
+    g.addColorStop(0.55, "rgba(255,236,186,0.95)");
+    g.addColorStop(1, "rgba(255,236,186,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, s, s);
+    _ringTex = PIXI.Texture.from(cv); return _ringTex;
+  }
+  // dunkler Spotlight-Backdrop: dimmt den hellen Reel-Hintergrund hinter dem Gewinn,
+  // damit Symbol + warmes Glow "abheben" (additives Glow allein verschwindet auf Weiß).
+  let _backTex = null;
+  function backdropTex() {
+    if (_backTex) return _backTex;
+    const s = 256, cv = document.createElement("canvas"); cv.width = cv.height = s;
+    const ctx = cv.getContext("2d");
+    const g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+    g.addColorStop(0, "rgba(6,5,10,0.92)");
+    g.addColorStop(0.55, "rgba(6,5,10,0.62)");
+    g.addColorStop(1, "rgba(6,5,10,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, s, s);
+    _backTex = PIXI.Texture.from(cv); return _backTex;
+  }
+
   /* ------------------------------------------------------------
      SymbolSprite — eine Kachel.
      >>> HIER deine echten Sprites einsetzen <<<
@@ -21,6 +61,23 @@
 
     _build() {
       const s = C.CELL;
+      // Dunkler Spotlight-Backdrop GANZ HINTEN (dimmt den hellen Reel beim Win).
+      this.backdrop = new PIXI.Sprite(backdropTex());
+      this.backdrop.anchor.set(0.5);
+      this.backdrop.position.set(s / 2, s / 2);
+      this.backdrop.width = this.backdrop.height = s * 1.55;
+      this.backdrop.alpha = 0;
+      this.addChild(this.backdrop);
+
+      // Glow-Flare HINTER dem Symbol (Win/Scatter-Tension). Additiv, normal unsichtbar.
+      this.glow = new PIXI.Sprite(glowTex());
+      this.glow.anchor.set(0.5);
+      this.glow.position.set(s / 2, s / 2);
+      this.glow.blendMode = PIXI.BLEND_MODES.ADD;
+      this.glow.width = this.glow.height = s * 1.75;
+      this.glow.alpha = 0;
+      this.addChild(this.glow);
+
       // Symbol-Bild (füllt die Kachel; Texturen sind quadratisch).
       this.sprite = new PIXI.Sprite(PIXI.Texture.EMPTY);
       this.sprite.anchor.set(0.5);
@@ -29,6 +86,14 @@
       this.sprite.height = s;
       this.sprite.roundPixels = true;     // ganzzahlige Geräte-Pixel -> kein Subpixel-Flimmern
       this.addChild(this.sprite);
+
+      // Flash ÜBER dem Symbol (leuchtet beim Win additiv auf). Gleiche Textur wie sprite.
+      this.flash = new PIXI.Sprite(PIXI.Texture.EMPTY);
+      this.flash.anchor.set(0.5);
+      this.flash.position.set(s / 2, s / 2);
+      this.flash.blendMode = PIXI.BLEND_MODES.ADD;
+      this.flash.alpha = 0;
+      this.addChild(this.flash);
 
       // Overlay-Sprite für Animationen (Landing/Win). Liegt über dem statischen
       // Symbol; während eine Anim läuft, wird das statische Symbol ausgeblendet.
@@ -114,13 +179,36 @@
       });
     }
 
-    // Landing-Animation beim Landen (fire-and-forget; no-op ohne Sheet).
-    // Scatter wird hier NICHT animiert -> der Scatter-Spezial-Flow steuert ihn (Tension-Glow).
+    // Landing-Animation beim Landen (fire-and-forget). Sheet -> Spritesheet,
+    // sonst prozedurales Squash-&-Stretch (Aufprall-Impuls).
     playLanding() {
-      if (this.def.kind === "scatter") return;
+      if (this._dead) return;
       const an = this._anims();
-      if (!an || !an.landing) return;
-      this._playFrames(an.landing, C.TIMING.landingDur || 520, this._baseScale());
+      if (an && an.landing && this.def.kind !== "scatter") {
+        this._playFrames(an.landing, C.TIMING.landingDur || 520, this._baseScale()); return;
+      }
+      this._squashLand();
+    }
+
+    // Squash beim Aufprall: kurz breit/flach -> Gegenschwung schmal/hoch -> Settle mit Overshoot.
+    // Leichtes y-Dip verkauft den "auf den Boden geknallt"-Impuls.
+    async _squashLand() {
+      const b = this._spBase || 1, sp = this.sprite, s = C.CELL, sz = s * this._baseScale();
+      LF.tween.killOf(sp.scale); LF.tween.killOf(sp.position);
+      await Promise.all([
+        LF.tween.to(sp.scale, { x: b * 1.18, y: b * 0.82 }, 70, LF.ease.outQuad),
+        LF.tween.to(sp.position, { y: s / 2 + sz * 0.05 }, 70, LF.ease.outQuad),
+      ]);
+      if (this._dead) return;
+      await Promise.all([
+        LF.tween.to(sp.scale, { x: b * 0.92, y: b * 1.10 }, 95, LF.ease.outQuad),
+        LF.tween.to(sp.position, { y: s / 2 - sz * 0.015 }, 95, LF.ease.outQuad),
+      ]);
+      if (this._dead) return;
+      await Promise.all([
+        LF.tween.to(sp.scale, { x: b, y: b }, 160, LF.ease.outBack),
+        LF.tween.to(sp.position, { y: s / 2 }, 160, LF.ease.outBack),
+      ]);
     }
 
     /* ---- Scatter-Spezial-Flow: Landing-Glow als Dauerschleife + Win-Burst ---- */
@@ -165,9 +253,12 @@
     destroy(opts) {
       this._dead = true;
       this._loopOn = false;
+      this._pulseOn = false;
       if (this._loopDriver) { LF.tween.killOf(this._loopDriver); this._loopDriver = null; }
       if (this._animDriver) { LF.tween.killOf(this._animDriver); this._animDriver = null; }
       LF.tween.killOf(this.anim);
+      LF.tween.killOf(this.sprite); LF.tween.killOf(this.sprite.scale); LF.tween.killOf(this.sprite.position);
+      LF.tween.killOf(this.glow); LF.tween.killOf(this.flash); LF.tween.killOf(this.flash.scale); LF.tween.killOf(this.backdrop);
       super.destroy(opts);
     }
 
@@ -182,6 +273,9 @@
         const size = s * this._baseScale();
         this.sprite.width = size;
         this.sprite.height = size;
+        this.sprite.rotation = 0;
+        this.sprite.position.set(s / 2, s / 2);
+        this._spBase = this.sprite.scale.x; // Basis-Skalierung für Squash/Pop merken
         this.label.visible = false;
       } else {
         // Textur fehlt -> Platzhalter-Text (z.B. wenn über file:// geöffnet)
@@ -191,51 +285,123 @@
       }
     }
 
-    // Gewinn-Hervorhebung: Win-Spritesheet (falls vorhanden) ODER Puls-Fallback.
+    // Gewinn-Hervorhebung: Win-Spritesheet (falls vorhanden) ODER prozedurale Juice.
     async playWin() {
-      const dur = C.TIMING.winHighlight;
+      if (this._dead) return;
       const an = this._anims();
       if (an && an.win) {
-        // Win-Burst über die Highlight-Dauer. Non-Scatter an die Grundgröße gekoppelt
-        // (bleibt in der Zelle, kein Pop); nur der Scatter darf über den Rand (1.5).
-        // 80 ms Crossfade verdeckt den Wechsel.
-        await this._playFrames(an.win, dur, this.def.kind === "scatter" ? 1.5 : this._baseScale(), 80);
+        await this._playFrames(an.win, C.TIMING.winHighlight, this.def.kind === "scatter" ? 1.5 : this._baseScale(), 80);
         return;
       }
-      const flash = new PIXI.Graphics();
-      flash.beginFill(0xffffff, 0.0);
-      flash.drawRoundedRect(2, 2, C.CELL - 4, C.CELL - 4, 12);
-      flash.endFill();
-      this.addChild(flash);
-
-      // pulsieren über Pivot-Trick: skaliere children-Container? Einfacher: scale auf sich.
-      this.pivot.set(this._cx, this._cy);
-      this.position.x += this._cx;
-      this.position.y += this._cy;
-
-      await Promise.all([
-        LF.tween.to(this.scale, { x: 1.12, y: 1.12 }, dur * 0.4, LF.ease.outQuad),
-        LF.tween.to(flash, { alpha: 0.6 }, dur * 0.4, LF.ease.outQuad),
-      ]);
-      await Promise.all([
-        LF.tween.to(this.scale, { x: 1.0, y: 1.0 }, dur * 0.6, LF.ease.outQuad),
-        LF.tween.to(flash, { alpha: 0.0 }, dur * 0.6, LF.ease.outQuad),
-      ]);
-      this.removeChild(flash);
-      flash.destroy();
-      // Pivot zurück
-      this.position.x -= this._cx;
-      this.position.y -= this._cy;
-      this.pivot.set(0, 0);
+      await this._juiceWin();
     }
 
-    async fadeOut() {
-      this.pivot.set(this._cx, this._cy);
-      this.position.x += this._cx;
-      this.position.y += this._cy;
+    // Prozedurale Win-Juice: Anticipations-Dip -> Pop (Overshoot) + Glow-Flare +
+    // Schockwellen-Ring + additiver Flash + leichter Rotations-Wobble. Premiums knalliger.
+    async _juiceWin() {
+      if (this._dead) return;
+      const b = this._spBase || 1, sp = this.sprite, s = C.CELL, k = this.def.kind;
+      // Pop-Stärke (Win-Intensität ~30% reduziert: Aufschlag über 1.0 × 0.7).
+      const pop = k === "scatter" ? 1.32 : k === "wild" ? 1.29 : k === "high" ? 1.28 : k === "mid" ? 1.24 : 1.18;
+      LF.tween.killOf(sp.scale); LF.tween.killOf(sp); LF.tween.killOf(this.flash); LF.tween.killOf(this.flash.scale); LF.tween.killOf(this.glow); LF.tween.killOf(this.backdrop);
+
+      // Flash = gleiche Textur, additiv, warm getönt — "Symbol leuchtet auf".
+      this.flash.texture = sp.texture; this.flash.tint = 0xfff0cf; this.flash.scale.set(b); this.flash.rotation = 0; this.flash.alpha = 0;
+      this.glow.alpha = 0; this.backdrop.alpha = 0;
+      // Schockwellen-Ring (expandiert + fadet) — vor das Glow legen.
+      const ring = new PIXI.Sprite(ringTex());
+      ring.anchor.set(0.5); ring.position.set(s / 2, s / 2); ring.blendMode = PIXI.BLEND_MODES.ADD;
+      ring.width = ring.height = s * 0.85; ring.alpha = 0.66;
+      this.addChildAt(ring, 0);
+
+      // 1) Anticipations-Dip
+      await LF.tween.to(sp.scale, { x: b * 0.88, y: b * 0.88 }, 85, LF.ease.outQuad);
+      if (this._dead) { if (ring.parent) ring.parent.removeChild(ring); ring.destroy(); return; }
+
+      // 2) Pop + Flare + Ring + Wobble (Intensität ~30% reduziert)
+      const wob = LF.tween.to(sp, { rotation: 0.05 }, 110, LF.ease.outQuad)
+        .then(() => this._dead || LF.tween.to(sp, { rotation: -0.03 }, 95, LF.ease.outQuad))
+        .then(() => this._dead || LF.tween.to(sp, { rotation: 0 }, 80, LF.ease.outQuad));
       await Promise.all([
-        LF.tween.to(this, { alpha: 0 }, 180, LF.ease.inQuad),
-        LF.tween.to(this.scale, { x: 0.3, y: 0.3 }, 180, LF.ease.inQuad),
+        LF.tween.to(sp.scale, { x: b * pop, y: b * pop }, 210, LF.ease.outBack),
+        LF.tween.to(this.flash.scale, { x: b * pop, y: b * pop }, 210, LF.ease.outBack),
+        LF.tween.to(this.backdrop, { alpha: 0.57 }, 130, LF.ease.outQuad),
+        LF.tween.to(this.glow, { alpha: 0.5 }, 150, LF.ease.outQuad),
+        LF.tween.to(this.flash, { alpha: 0.49 }, 90, LF.ease.outQuad),
+        LF.tween.to(ring.scale, { x: 1.95, y: 1.95 }, 330, LF.ease.outQuad),
+        LF.tween.to(ring, { alpha: 0 }, 330, LF.ease.outQuad),
+        wob,
+      ]);
+      if (ring.parent) ring.parent.removeChild(ring); ring.destroy();
+      if (this._dead) return;
+
+      // 3) Settle leicht vergrößert + glühend (das Removal burstet danach weiter)
+      await Promise.all([
+        LF.tween.to(sp.scale, { x: b * 1.08, y: b * 1.08 }, 120, LF.ease.outQuad),
+        LF.tween.to(this.flash, { alpha: 0 }, 150, LF.ease.outQuad),
+        LF.tween.to(this.glow, { alpha: 0.29 }, 120, LF.ease.outQuad),
+        LF.tween.to(this.backdrop, { alpha: 0.43 }, 120, LF.ease.outQuad),
+      ]);
+    }
+
+    // Scatter-Burst (Scatter bleibt liegen) -> Juice + danach zurück auf normal.
+    async scatterBurst() {
+      await this._juiceWin();
+      if (this._dead) return;
+      const b = this._spBase || 1;
+      await Promise.all([
+        LF.tween.to(this.sprite.scale, { x: b, y: b }, 220, LF.ease.outQuad),
+        LF.tween.to(this.glow, { alpha: 0 }, 220, LF.ease.outQuad),
+        LF.tween.to(this.backdrop, { alpha: 0 }, 220, LF.ease.outQuad),
+      ]);
+    }
+
+    // Sanfter Dauer-Puls + Glow (Scatter-Tension, wenn 2+ Scatter gelandet sind).
+    startGlowPulse() {
+      if (this._dead || this._pulseOn) return;
+      this._pulseOn = true;
+      this._doPulse();
+    }
+    _doPulse() {
+      if (!this._pulseOn || this._dead) return;
+      const b = this._spBase || 1, sp = this.sprite;
+      Promise.all([
+        LF.tween.to(sp.scale, { x: b * 1.12, y: b * 1.12 }, 340, LF.ease.outQuad),
+        LF.tween.to(this.glow, { alpha: 0.85 }, 340, LF.ease.outQuad),
+        LF.tween.to(this.backdrop, { alpha: 0.5 }, 340, LF.ease.outQuad),
+      ]).then(() => {
+        if (!this._pulseOn || this._dead) return null;
+        return Promise.all([
+          LF.tween.to(sp.scale, { x: b, y: b }, 340, LF.ease.outQuad),
+          LF.tween.to(this.glow, { alpha: 0.34 }, 340, LF.ease.outQuad),
+          LF.tween.to(this.backdrop, { alpha: 0.25 }, 340, LF.ease.outQuad),
+        ]);
+      }).then(() => { if (this._pulseOn && !this._dead) this._doPulse(); });
+    }
+    stopGlowPulse() {
+      this._pulseOn = false;
+      if (this._dead) return;
+      const b = this._spBase || 1;
+      LF.tween.killOf(this.sprite.scale); LF.tween.killOf(this.glow); LF.tween.killOf(this.backdrop);
+      LF.tween.to(this.sprite.scale, { x: b, y: b }, 200, LF.ease.outQuad);
+      LF.tween.to(this.glow, { alpha: 0 }, 200, LF.ease.outQuad);
+      LF.tween.to(this.backdrop, { alpha: 0 }, 200, LF.ease.outQuad);
+    }
+
+    // Removal-Burst: kurz größer "knallen", dann mit Drall implodieren + ausfaden.
+    async fadeOut() {
+      if (this._dead) return;
+      const b = this._spBase || 1, sp = this.sprite;
+      LF.tween.killOf(sp.scale); LF.tween.killOf(sp);
+      this.glow.alpha = Math.max(this.glow.alpha, 0.35);
+      LF.tween.to(this.glow, { alpha: 0 }, 230, LF.ease.outQuad);
+      LF.tween.to(this.backdrop, { alpha: 0 }, 200, LF.ease.outQuad);
+      await LF.tween.to(sp.scale, { x: b * 1.32, y: b * 1.32 }, 90, LF.ease.outQuad);
+      if (this._dead) return;
+      await Promise.all([
+        LF.tween.to(this, { alpha: 0 }, 165, LF.ease.inQuad),
+        LF.tween.to(sp.scale, { x: b * 0.14, y: b * 0.14 }, 165, LF.ease.inQuad),
+        LF.tween.to(sp, { rotation: sp.rotation + 0.6 }, 165, LF.ease.inQuad),
       ]);
     }
   }
@@ -472,15 +638,15 @@
       const sc = this._scatterSprites();
       if (sc.length < 2) return;
       const an = LF.symbolAnims && LF.symbolAnims.SC;
-      if (!an || !an.landing) return;
       // Voller Tension-Hold nur wenn ein Trigger möglich ist (3+). Bei genau 2 (häufig,
       // kein Trigger) nur ein kurzer Glow -> kein totes ~1,3s-Warten auf jedem 2-Scatter-Spin
       // (die eigentliche "kommt die 3.?"-Spannung lief schon im langsamen Anticipation-Drop).
       const hold = sc.length >= 3 ? (C.TIMING.scatterTension || 1300) : (C.TIMING.scatterTensionShort || 350);
-      for (const sp of sc) sp.startAnimLoop(an.landing, C.TIMING.scatterLoop || 600, 1.34);
+      const useSheet = an && an.landing;
+      for (const sp of sc) useSheet ? sp.startAnimLoop(an.landing, C.TIMING.scatterLoop || 600, 1.34) : sp.startGlowPulse();
       if (LF.sound) LF.sound.tension(0);
       await LF.delay(hold);
-      for (const sp of sc) sp.stopAnimLoop(true);
+      for (const sp of sc) useSheet ? sp.stopAnimLoop(true) : sp.stopGlowPulse();
     }
 
     // SCATTER-WIN-BURST: beim Free-Spins-Trigger einmalig auf allen Scattern (parallel).
@@ -488,8 +654,8 @@
       const sc = this._scatterSprites();
       if (!sc.length) return;
       const an = LF.symbolAnims && LF.symbolAnims.SC;
-      if (!an || !an.win) return;
-      await Promise.all(sc.map((sp) => sp.playScatterWin()));
+      const useSheet = an && an.win;
+      await Promise.all(sc.map((sp) => useSheet ? sp.playScatterWin() : sp.scatterBurst()));
     }
 
     // Raster als 2D-ID-Array [col][row] (id | null) für das Math-Modell.
@@ -531,7 +697,7 @@
         for (const sp of survivors) {
           newCol[row] = sp;
           const { x, y } = this._xy(c, row);
-          drops.push(LF.tween.to(sp.position, { y }, C.TIMING.tumbleDrop, LF.ease.outBack));
+          if (sp && !sp._dead) drops.push(LF.tween.to(sp.position, { y }, C.TIMING.tumbleDrop, LF.ease.outBack));
           row--;
         }
         // restliche obere Zeilen neu befüllen (in FS mit Scatter, sonst ohne)
@@ -545,8 +711,12 @@
           newCol[rr] = sp;
           drops.push(
             (async () => {
-              await LF.delay((row - rr) * 25);
-              await LF.tween.to(sp.position, { y }, C.TIMING.tumbleDrop, LF.ease.outBack);
+              try {
+                await LF.delay((row - rr) * 25);
+                // Symbol könnte zwischenzeitlich entfernt sein (z.B. neuer Spin/_clear) -> defensiv.
+                if (!sp || sp._dead || sp._destroyed) return;
+                await LF.tween.to(sp.position, { y }, C.TIMING.tumbleDrop, LF.ease.outBack);
+              } catch (e) {}
               // KEIN Landing beim Nachdroppen (Tumble) -> Landing nur beim ersten Board-Drop.
             })()
           );

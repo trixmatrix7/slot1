@@ -1,0 +1,16 @@
+{
+  "name": "slot-onchain",
+  "version": "0.1.0",
+  "description": "On-chain commit/reveal slot integration: Solidity contracts, ABIs, and EIP-1193 client. Engine-agnostic.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@noble/hashes": "^1.4.0"
+  },
+  "peerDependencies": {
+    "viem": "^2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "viem": { "optional": true }
+  }
+}

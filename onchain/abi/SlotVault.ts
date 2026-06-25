@@ -1,0 +1,15 @@
+export const SLOT_VAULT_ABI = [
+  { type: "function", name: "depositLP",  stateMutability: "payable",
+    inputs: [], outputs: [{ name: "minted", type: "uint256" }] },
+  { type: "function", name: "withdrawLP", stateMutability: "nonpayable",
+    inputs: [{ name: "sharesAmount", type: "uint256" }],
+    outputs: [{ name: "amount", type: "uint256" }] },
+  { type: "function", name: "fund", stateMutability: "nonpayable",
+    inputs: [{ name: "amount", type: "uint256" }], outputs: [] },
+  { type: "function", name: "deposit", stateMutability: "payable",
+    inputs: [], outputs: [] },
+  { type: "function", name: "shares", stateMutability: "view",
+    inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "totalShares", stateMutability: "view",
+    inputs: [], outputs: [{ type: "uint256" }] },
+] as const;

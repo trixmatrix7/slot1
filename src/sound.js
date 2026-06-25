@@ -12,8 +12,15 @@
       this.ctx = null;
       this.master = null;
       this.enabled = true;      // SFX
-      this.musicEnabled = true; // Musik (Loop, optional)
+      this.musicEnabled = true; // Musik (Loop)
       this._sirenNode = null;
+      // Background-Music-Loop
+      this.musicGain = null;
+      this.musicBuffer = null;
+      this.musicSource = null;
+      this._musicLoading = false;
+      this.musicUrl = "assets/audio/music_loop.wav";
+      this.musicVolume = 0.42;
     }
 
     unlock() {
@@ -24,12 +31,53 @@
         this.master = this.ctx.createGain();
         this.master.gain.value = 0.5;
         this.master.connect(this.ctx.destination);
+        // eigener Gain für Musik (unabhängig von den SFX) -> Toggle steuert nur Musik
+        this.musicGain = this.ctx.createGain();
+        this.musicGain.gain.value = this.musicVolume;
+        this.musicGain.connect(this.ctx.destination);
       }
       if (this.ctx.state === "suspended") this.ctx.resume();
+      // Musik bei erster Geste laden + starten (sofern aktiviert)
+      this._loadMusic();
     }
 
     setEnabled(on) { this.enabled = !!on; }
-    setMusic(on) { this.musicEnabled = !!on; }
+
+    setMusic(on) {
+      this.musicEnabled = !!on;
+      if (!this.ctx) return;
+      if (this.musicEnabled) { if (this.musicBuffer) this.startMusic(); else this._loadMusic(); }
+      else this.stopMusic();
+    }
+
+    /* ---------- Background-Music-Loop (WAV) ---------- */
+    _loadMusic() {
+      if (this.musicBuffer || this._musicLoading || !this.ctx) { if (this.musicBuffer && this.musicEnabled) this.startMusic(); return; }
+      this._musicLoading = true;
+      fetch(this.musicUrl)
+        .then((r) => r.arrayBuffer())
+        .then((ab) => this.ctx.decodeAudioData(ab))
+        .then((buf) => { this.musicBuffer = buf; this._musicLoading = false; if (this.musicEnabled) this.startMusic(); })
+        .catch((e) => { this._musicLoading = false; console.warn("music load fail:", e); });
+    }
+
+    startMusic() {
+      if (!this.ctx || !this.musicBuffer || this.musicSource) return;
+      const src = this.ctx.createBufferSource();
+      src.buffer = this.musicBuffer;
+      src.loop = true;
+      src.connect(this.musicGain);
+      src.start(0);
+      this.musicSource = src;
+    }
+
+    stopMusic() {
+      if (this.musicSource) {
+        try { this.musicSource.stop(); } catch (e) {}
+        try { this.musicSource.disconnect(); } catch (e) {}
+        this.musicSource = null;
+      }
+    }
 
     _tone({ freq = 440, dur = 0.12, type = "sine", gain = 0.2, attack = 0.005, slideTo = null, when = 0 }) {
       if (!this.enabled || !this.ctx) return;

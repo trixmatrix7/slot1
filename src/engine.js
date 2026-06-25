@@ -44,6 +44,12 @@
       this.ui.setBet(this.effectiveBet);
     }
 
+    setBetMax() {
+      if (this.busy) return;
+      this.betIndex = C.BET_LEVELS.length - 1;
+      this.ui.setBet(this.effectiveBet);
+    }
+
     toggleAutoplay() {
       this.autoplay = !this.autoplay;
       this.ui.setAutoplay(this.autoplay);

@@ -37,6 +37,7 @@
   ui.onToggleBoost = () => engine.toggleBoost();
   ui.onBuyBetChange = (dir) => { engine.changeBet(dir); engine.openBuyMenu(); };
   ui.onAutoplay = () => engine.toggleAutoplay();
+  ui.onBetMax = () => engine.setBetMax();
   ui.onMenu = () => ui.openSettingsMenu();
 
   // --- Ticker: Tweens + UI-Animation ---
@@ -92,6 +93,7 @@
       intro.showError("Bilder nicht geladen — bitte über http://localhost:8080 starten.");
       return;
     }
+    ui.refreshUITextures(); // Control-Bar-Bilder jetzt einsetzen (UI wurde vor dem Laden gebaut)
     await intro.showSplash();          // wartet auf Klick (schaltet Audio frei)
     await intro.finish();              // Intro ausblenden
     grid.spawnAll(false);              // Startboard (ohne Anticipation/Sirene)

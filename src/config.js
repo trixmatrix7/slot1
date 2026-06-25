@@ -24,7 +24,7 @@
 
   // Raster leicht oberhalb der Mitte, zentriert (Controls liegen unten).
   const GRID_X = Math.round((DESIGN_W - GRID_W) / 2);          // links
-  const GRID_Y = 112;                                          // oben
+  const GRID_Y = 90;                                           // oben (Platz für volle Control-Bar)
 
   /* -----------------------------------------------------------------
      SYMBOL-DEFINITIONEN (Platzhalter).
@@ -53,7 +53,9 @@
   // Sheets aus Sprite Studio: 6×5 / 30 Frames / 256px / 60fps / 500ms (untrimmed Raster).
   // Premiums: Landing (beim Landen) + Win (beim Connecten). Royals/Non-Premium ganz ohne Anim.
   // Scatter (SC) wird NICHT generisch animiert -> eigener Spezial-Flow (Tension-Glow + Win-Burst).
-  const SYMBOL_ANIM = {
+  // ALT (aus den vorigen Charakteren gebacken: Rapper/Biker/Handschellen/Whiskey).
+  // Passt NICHT zu den neuen Prison-Symbolen -> deaktiviert. Restore: SYMBOL_ANIM = SYMBOL_ANIM_OLD.
+  const SYMBOL_ANIM_OLD = {
     BOSS1:   { landing: ANIM_PATH + "high_a_landing.png", win: ANIM_PATH + "high_a_win.png", cols: 6, rows: 5, frames: 30 }, // high A (Rapper)
     BOSS2:   { landing: ANIM_PATH + "high_b_landing.png", win: ANIM_PATH + "high_b_win.png", cols: 6, rows: 5, frames: 30 }, // high B (Biker)
     CUFFS:   { landing: ANIM_PATH + "mid_c_landing.png",  win: ANIM_PATH + "mid_c_win.png",  cols: 6, rows: 5, frames: 30 }, // Handschellen
@@ -61,6 +63,9 @@
     W:       { landing: ANIM_PATH + "wild_landing.png",   win: ANIM_PATH + "wild_win.png",   cols: 6, rows: 5, frames: 30 }, // Wild
     SC:      { landing: ANIM_PATH + "scatter_landing.png", win: ANIM_PATH + "scatter_win.png", cols: 6, rows: 5, frames: 30 }, // Scatter (Spezial-Flow)
   };
+  // Aktiv: keine Symbol-Animationen (neue Prison-Symbole sind statisch -> Win nutzt Fallback-Puls).
+  // Sobald neue, passende Sheets vorliegen: hier wieder befüllen (oder = SYMBOL_ANIM_OLD).
+  const SYMBOL_ANIM = {};
 
   /* Die 9 echten Symbole.
        tex   : Dateiname (ohne .png) in assets/symbols/
@@ -74,11 +79,11 @@
     { id: "Q", label: "Q", tex: "symbol_low_f", kind: "royal", weight: 28, pays: { 9: 0.6, 12: 2.5, 15: 10 } },
     { id: "J", label: "J", tex: "symbol_low_g", kind: "royal", weight: 26, pays: { 9: 0.8, 12: 3, 15: 12 } },
     // Mid
-    { id: "CUFFS",   label: "Handschellen", tex: "symbol_mid_c", kind: "mid", weight: 16, pays: { 8: 2, 10: 12, 13: 60 } },
-    { id: "WHISKEY", label: "Whiskey",      tex: "symbol_mid_d", kind: "mid", weight: 13, pays: { 8: 3, 10: 18, 13: 100 } },
+    { id: "CUFFS",   label: "Hammer", tex: "symbol_mid_c", kind: "mid", weight: 16, pays: { 8: 2, 10: 12, 13: 60 } },
+    { id: "WHISKEY", label: "Messer", tex: "symbol_mid_d", kind: "mid", weight: 13, pays: { 8: 3, 10: 18, 13: 100 } },
     // High (Charaktere) — sehr hoher Top-End für fetten Tail Richtung 10.000×
-    { id: "BOSS1", label: "Boss A", tex: "symbol_high_a", kind: "high", weight: 10, pays: { 8: 12, 10: 70, 12: 500 } },
-    { id: "BOSS2", label: "Boss B", tex: "symbol_high_b", kind: "high", weight: 8,  pays: { 8: 22, 10: 140, 12: 1500 } },
+    { id: "BOSS1", label: "Wärter",   tex: "symbol_high_a", kind: "high", weight: 10, pays: { 8: 12, 10: 70, 12: 500 } },
+    { id: "BOSS2", label: "Häftling", tex: "symbol_high_b", kind: "high", weight: 8,  pays: { 8: 22, 10: 140, 12: 1500 } },
     // Wild — ersetzt alle Pay-Symbole (kein eigener Pay)
     { id: "W",  label: "WILD",    tex: "symbol_wild",    kind: "wild",    weight: 6, pays: null },
     // Scatter — löst Free Spins aus, zahlt nicht, bleibt beim Tumble liegen

@@ -50,18 +50,27 @@
         it.t += dt;
         let p = it.duration > 0 ? Math.min(1, it.t / it.duration) : 1;
         const e = it.easeFn(p);
-        for (const k in it.props) {
-          it.target[k] = LF.lerp(it.from[k], it.props[k], e);
-        }
+        // BULLETPROOF: ein zerstörtes Ziel (PIXI null nach destroy) darf NIE die
+        // Update-Schleife abbrechen — sonst stoppt PIXI den Ticker (kein next rAF).
+        try {
+          for (const k in it.props) it.target[k] = LF.lerp(it.from[k], it.props[k], e);
+        } catch (err) { p = 1; } // Ziel kaputt -> Tween hier beenden
         if (p >= 1) {
           this._items.splice(i, 1);
           it.resolve();
         }
       }
     },
-    // Bricht laufende Tweens auf einem Target ab (ohne resolve-Sprung)
+    // Bricht laufende Tweens auf einem Target ab. WICHTIG: das zugehörige Promise
+    // wird trotzdem resolved — sonst hängt ein `await`eter Tween, der gekillt wird,
+    // für immer (Deadlock). Der Tween springt nur nicht auf den Endwert.
     killOf(target) {
-      this._items = this._items.filter((it) => it.target !== target);
+      const keep = [];
+      for (const it of this._items) {
+        if (it.target === target) { try { it.resolve(); } catch (e) {} }
+        else keep.push(it);
+      }
+      this._items = keep;
     },
   };
 
@@ -188,7 +197,40 @@
       )
     );
     await LF.loadSymbolAnims(); // Animations-Sheets (optional) nachladen
+    await LF.loadUIAssets();    // Control-Bar-Bilder (aus dem Figma/HTML-Export)
     return LF.textures;
+  };
+
+  /* ============================================================
+     UI-BILDER (Control-Bar) — echte PNGs aus dem Design-Export.
+     LF.uiTextures[name] = PIXI.Texture. Fehlt eins -> still übersprungen.
+     ============================================================ */
+  LF.uiTextures = {};
+  LF.loadUIAssets = async function () {
+    const files = {
+      coin: "coin", sndOn: "snd_on", sndOff: "snd_off", help: "help", dice: "dice",
+      clusterIdle: "cluster_idle", clusterStop: "cluster_stop",
+    };
+    // Fertige Overlay-Panels (volle PNGs aus dem Design) -> als Hintergrund der Menüs
+    const overlays = {
+      ovSystem: "system", ovAutoplay: "autoplay", ovBet: "bet", ovBuy: "buy",
+      ovConfirmBuy: "confirm_buy", ovConfirmFeature: "confirm_feature",
+      ovInfo: "info", ovPaytable: "paytable",
+      ovRngOverview: "rng_overview", ovRngSeeds: "rng_seeds", ovRngVerify: "rng_verify",
+    };
+    const load = (k, src) =>
+      new Promise((resolve) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => { try { LF.uiTextures[k] = PIXI.Texture.from(img); } catch (e) {} resolve(); };
+        img.onerror = () => resolve();
+        img.src = src;
+      });
+    await Promise.all([
+      ...Object.keys(files).map((k) => load(k, "assets/ui/" + files[k] + ".png")),
+      ...Object.keys(overlays).map((k) => load(k, "assets/ui/overlays/" + overlays[k] + ".png")),
+    ]);
+    return LF.uiTextures;
   };
 
   /* ============================================================

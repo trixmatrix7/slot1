@@ -38,8 +38,8 @@ html, body {
   position: absolute;
   inset: 0;
   z-index: 0;
-  /* Dein Hintergrundbild (optimiert). Datei: assets/background.jpg */
-  background: #1a1320 url("assets/background.jpg") center center / cover no-repeat;
+  /* Hintergrundbild (Prison-Theme, variante 2). Alternative: assets/background_alt.png (Zellenblock). */
+  background: #0d1016 url("assets/background.png") center center / cover no-repeat;
 }
 
 #bg-hint { display: none; }
