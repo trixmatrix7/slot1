@@ -30,6 +30,32 @@
     ctx.fillStyle = g; ctx.fillRect(0, 0, s, s);
     _ringTex = PIXI.Texture.from(cv); return _ringTex;
   }
+  // Scatter-Orbit: heller "Komet" (Lichtpunkt mit Halo) + dünner Bahn-Ring.
+  let _cometTex = null, _trackTex = null;
+  function cometTex() {
+    if (_cometTex) return _cometTex;
+    const s = 128, cv = document.createElement("canvas"); cv.width = cv.height = s;
+    const ctx = cv.getContext("2d");
+    const g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+    g.addColorStop(0, "rgba(255,255,255,1)");
+    g.addColorStop(0.22, "rgba(255,236,170,0.95)");
+    g.addColorStop(0.5, "rgba(255,190,90,0.45)");
+    g.addColorStop(1, "rgba(255,170,60,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, s, s);
+    _cometTex = PIXI.Texture.from(cv); return _cometTex;
+  }
+  function trackTex() {
+    if (_trackTex) return _trackTex;
+    const s = 256, cv = document.createElement("canvas"); cv.width = cv.height = s;
+    const ctx = cv.getContext("2d");
+    const g = ctx.createRadialGradient(s / 2, s / 2, s * 0.40, s / 2, s / 2, s * 0.5);
+    g.addColorStop(0, "rgba(255,224,150,0)");
+    g.addColorStop(0.62, "rgba(255,220,140,0.55)");
+    g.addColorStop(1, "rgba(255,220,140,0)");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, s, s);
+    _trackTex = PIXI.Texture.from(cv); return _trackTex;
+  }
+
   // dunkler Spotlight-Backdrop: dimmt den hellen Reel-Hintergrund hinter dem Gewinn,
   // damit Symbol + warmes Glow "abheben" (additives Glow allein verschwindet auf Weiß).
   let _backTex = null;
@@ -254,11 +280,13 @@
       this._dead = true;
       this._loopOn = false;
       this._pulseOn = false;
+      this._orbitOn = false;
       if (this._loopDriver) { LF.tween.killOf(this._loopDriver); this._loopDriver = null; }
       if (this._animDriver) { LF.tween.killOf(this._animDriver); this._animDriver = null; }
       LF.tween.killOf(this.anim);
       LF.tween.killOf(this.sprite); LF.tween.killOf(this.sprite.scale); LF.tween.killOf(this.sprite.position);
       LF.tween.killOf(this.glow); LF.tween.killOf(this.flash); LF.tween.killOf(this.flash.scale); LF.tween.killOf(this.backdrop);
+      if (this.orbit) { LF.tween.killOf(this.orbit); LF.tween.killOf(this._orbitTrack); }
       super.destroy(opts);
     }
 
@@ -386,6 +414,41 @@
       LF.tween.to(this.sprite.scale, { x: b, y: b }, 200, LF.ease.outQuad);
       LF.tween.to(this.glow, { alpha: 0 }, 200, LF.ease.outQuad);
       LF.tween.to(this.backdrop, { alpha: 0 }, 200, LF.ease.outQuad);
+    }
+
+    /* ---- Scatter-Orbit: Licht wandert im Kreis um den Scatter (Sweat) ---- */
+    _buildOrbit() {
+      if (this.orbit) return;
+      const s = C.CELL, R = s * 0.86;
+      const o = new PIXI.Container(); o.position.set(s / 2, s / 2); o.alpha = 0;
+      const track = new PIXI.Sprite(trackTex());
+      track.anchor.set(0.5); track.width = track.height = R * 2.5; track.blendMode = PIXI.BLEND_MODES.ADD; track.alpha = 0;
+      o.addChild(track);
+      const mk = (size) => { const c = new PIXI.Sprite(cometTex()); c.anchor.set(0.5); c.width = c.height = size; c.blendMode = PIXI.BLEND_MODES.ADD; return c; };
+      const c1 = mk(s * 0.66); c1.position.set(R, 0);
+      const c2 = mk(s * 0.42); c2.position.set(-R, 0);
+      o.addChild(c1); o.addChild(c2);
+      this.orbit = o; this._orbitTrack = track;
+      this.addChild(o); // ganz oben -> Licht über den Zellrändern
+    }
+    startScatterOrbit() {
+      if (this._dead || this._orbitOn) return;
+      this._buildOrbit();
+      this._orbitOn = true;
+      this.orbit.alpha = 1;
+      LF.tween.killOf(this._orbitTrack); LF.tween.to(this._orbitTrack, { alpha: 0.6 }, 300, LF.ease.outQuad);
+      this.startGlowPulse(); // Glow/Backdrop atmen mit
+      const spin = () => {
+        if (!this._orbitOn || this._dead) return;
+        this.orbit.rotation = 0;
+        LF.tween.to(this.orbit, { rotation: Math.PI * 2 }, 820, (t) => t).then(() => { if (this._orbitOn && !this._dead) spin(); });
+      };
+      spin();
+    }
+    stopScatterOrbit() {
+      this._orbitOn = false;
+      this.stopGlowPulse();
+      if (this.orbit && !this._dead) { LF.tween.killOf(this.orbit); LF.tween.to(this.orbit, { alpha: 0 }, 220, LF.ease.outQuad); }
     }
 
     // Removal-Burst: kurz größer "knallen", dann mit Drall implodieren + ausfaden.
@@ -523,23 +586,45 @@
       const scatInCol = (c) => {
         let n = 0; for (let r = 0; r < C.ROWS; r++) if (this.cells[c][r].def.kind === "scatter") n++; return n;
       };
+      // antStart = erste Spalte, ab der bereits >=2 Scatter gefallen sind (der 2. landet davor).
       let cum = 0, antStart = C.COLS;
       for (let c = 0; c < C.COLS; c++) { if (cum >= 2) { antStart = c; break; } cum += scatInCol(c); }
 
+      // Phase 1: normale (schnelle) Spalten bis der 2. Scatter gelandet ist.
       const normals = [];
       for (let c = 0; c < antStart; c++) normals.push(this._dropColumn(c, false, c));
       await Promise.all(normals);
 
-      if (anticipate && antStart < C.COLS) {
-        if (LF.sound) LF.sound.siren(1.2);
-        const police = this._startPolice();
-        for (let c = antStart; c < C.COLS; c++) {
-          if (LF.sound) LF.sound.tension(c - antStart);
-          await this._dropColumn(c, true, 0);
-          await LF.delay(C.TIMING.sweatPause);
-        }
-        this._stopPolice(police);
+      // Kein Sweat -> Rest normal.
+      if (!anticipate || antStart >= C.COLS) {
+        const rest = [];
+        for (let c = antStart; c < C.COLS; c++) rest.push(this._dropColumn(c, false, c - antStart));
+        await Promise.all(rest);
+        return;
       }
+
+      // === SWEAT ab dem 2. gelandeten Scatter ===
+      this._orbitScatters();                       // Licht kreist um die gelandeten Scatter
+      if (LF.sound) { if (LF.sound.startSweat) LF.sound.startSweat(); else LF.sound.siren(1.2); }
+      const police = this._startPolice();
+      const remaining = [];
+      for (let c = antStart; c < C.COLS; c++) remaining.push(c);
+
+      for (let i = 0; i < remaining.length; i++) {
+        const c = remaining[i];
+        this._setSweatColumns(remaining.slice(i), c);   // alle ausstehenden markiert, aktive pulsiert
+        if (LF.sound && LF.sound.tension) LF.sound.tension(i);
+        await this._dropColumn(c, true, 0);
+        this._clearColHighlight(c);
+        // Neuer Scatter gelandet? -> sofort orbiten + Reveal-Ding
+        if (this._orbitScatters() && LF.sound && LF.sound.scatterReveal) LF.sound.scatterReveal();
+        await LF.delay(C.TIMING.sweatPause);
+      }
+
+      this._clearSweatColumns();
+      this._stopPolice(police);
+      if (LF.sound && LF.sound.stopSweat) LF.sound.stopSweat();
+      await LF.delay(240); // kurzer "Moment der Wahrheit" — Orbits laufen weiter
     }
 
     async _dropColumn(c, slow, staggerIdx) {
@@ -611,6 +696,106 @@
       });
     }
 
+    /* ============ SWEAT: Spalten-Highlights + Orbit-Verwaltung ============ */
+    // Glühender Rahmen + Glow-Streifen über einer Spalte (markiert: "hier könnte der nächste Scatter fallen").
+    _colHighlight(c) {
+      if (!this._colHi) this._colHi = {};
+      if (this._colHi[c]) return this._colHi[c];
+      const s = C.CELL, g = C.GAP, x = c * (s + g), h = C.GRID_H;
+      const cont = new PIXI.Container(); cont.zIndex = 6;
+      // dunkler Strip: dimmt die noch leere Spalte -> Rahmen/Glow heben sich ab.
+      const dim = new PIXI.Graphics();
+      dim.beginFill(0x070710, 1); dim.drawRoundedRect(x, 0, s, h, 8); dim.endFill();
+      dim.alpha = 0; cont.addChild(dim);
+      // Glow-Streifen (warm, additiv)
+      const glow = new PIXI.Sprite(glowTex());
+      glow.anchor.set(0.5); glow.position.set(x + s / 2, h / 2); glow.width = s * 1.6; glow.height = h * 1.05;
+      glow.blendMode = PIXI.BLEND_MODES.ADD; glow.alpha = 0; cont.addChild(glow);
+      // heller, dicker Gold-Rahmen + dünne Innenlinie
+      const frame = new PIXI.Graphics();
+      frame.lineStyle({ width: 4.5, color: 0xffd633, alpha: 1, alignment: 0 });
+      frame.drawRoundedRect(x - 1, -1, s + 2, h + 2, 9);
+      frame.lineStyle({ width: 1.5, color: 0xffffff, alpha: 0.7, alignment: 0 });
+      frame.drawRoundedRect(x + 3, 3, s - 6, h - 6, 7);
+      frame.alpha = 0; cont.addChild(frame);
+      this.addChild(cont);
+      this._colHi[c] = { cont, dim, glow, frame };
+      return this._colHi[c];
+    }
+    // Markiere die Spalten in `cols`; die `active` (gerade fallende) leuchtet stärker + pulsiert.
+    _setSweatColumns(cols, active) {
+      cols = cols || [];
+      for (let c = 0; c < C.COLS; c++) {
+        const want = cols.indexOf(c) >= 0;
+        if (want) {
+          const hl = this._colHighlight(c), act = c === active;
+          LF.tween.killOf(hl.glow); LF.tween.killOf(hl.frame); LF.tween.killOf(hl.dim);
+          LF.tween.to(hl.dim, { alpha: act ? 0.2 : 0.42 }, 200, LF.ease.outQuad);
+          LF.tween.to(hl.glow, { alpha: act ? 0.85 : 0.4 }, 200, LF.ease.outQuad);
+          LF.tween.to(hl.frame, { alpha: act ? 1 : 0.6 }, 200, LF.ease.outQuad);
+          hl._active = act;
+          if (act) this._pulseCol(hl);
+        } else if (this._colHi && this._colHi[c]) {
+          this._fadeCol(this._colHi[c]); delete this._colHi[c];
+        }
+      }
+    }
+    _pulseCol(hl) {
+      if (!hl._active || !hl.glow.parent) return;
+      LF.tween.to(hl.glow, { alpha: 1 }, 300, LF.ease.outQuad)
+        .then(() => { if (!hl._active || !hl.glow.parent) return null; return LF.tween.to(hl.glow, { alpha: 0.6 }, 300, LF.ease.outQuad); })
+        .then(() => { if (hl._active && hl.glow.parent) this._pulseCol(hl); });
+    }
+    _fadeCol(hl) {
+      hl._active = false;
+      LF.tween.killOf(hl.glow); LF.tween.killOf(hl.frame); LF.tween.killOf(hl.dim);
+      LF.tween.to(hl.frame, { alpha: 0 }, 220);
+      LF.tween.to(hl.dim, { alpha: 0 }, 240);
+      LF.tween.to(hl.glow, { alpha: 0 }, 240).then(() => { if (hl.cont && hl.cont.parent) hl.cont.parent.removeChild(hl.cont); if (hl.cont) hl.cont.destroy(); });
+    }
+    _clearColHighlight(c) { if (this._colHi && this._colHi[c]) { this._fadeCol(this._colHi[c]); delete this._colHi[c]; } }
+    _clearSweatColumns() { if (!this._colHi) return; Object.keys(this._colHi).forEach((c) => this._fadeCol(this._colHi[c])); this._colHi = {}; }
+
+    // Startet den Orbit auf allen Scattern, die noch nicht orbiten. true, wenn neue dazukamen.
+    _orbitScatters() {
+      let any = false;
+      for (const sp of this._scatterSprites()) if (!sp._orbitOn && !sp._dead) { sp.startScatterOrbit(); any = true; }
+      return any;
+    }
+    stopAllOrbits() { for (const sp of this._scatterSprites()) sp.stopScatterOrbit(); }
+
+    /* ============ FREE-SPINS-ÜBERGANG: Grid dreht sich in sich ein ============ */
+    async playFSTransition() {
+      const cx = C.GRID_W / 2, cy = C.GRID_H / 2;
+      this._maskGfx = this._maskGfx || this.mask;
+      this.mask = null; // Rotation darf nicht geclippt werden
+      this.pivot.set(cx, cy);
+      this.position.set(C.GRID_X + cx, C.GRID_Y + cy);
+      if (LF.sound && LF.sound.whoosh) LF.sound.whoosh();
+      await Promise.all([
+        LF.tween.to(this, { rotation: Math.PI * 2.5 }, 600, LF.ease.inQuad),
+        LF.tween.to(this.scale, { x: 0.02, y: 0.02 }, 600, LF.ease.inQuad),
+        LF.tween.to(this, { alpha: 0 }, 600, LF.ease.inQuad),
+      ]);
+      this._clear(); // Board leeren -> beim Restore blitzt nichts Altes auf
+    }
+    // Grid wieder zurücksetzen (für die Free Spins) — kann optional "aufdrehen".
+    async restoreFromTransition(animate) {
+      this.pivot.set(C.GRID_W / 2, C.GRID_H / 2);
+      this.position.set(C.GRID_X + C.GRID_W / 2, C.GRID_Y + C.GRID_H / 2);
+      if (animate) {
+        this.rotation = -Math.PI * 2; this.scale.set(0.05); this.alpha = 0;
+        await Promise.all([
+          LF.tween.to(this, { rotation: 0 }, 520, LF.ease.outCubic),
+          LF.tween.to(this.scale, { x: 1, y: 1 }, 520, LF.ease.outBack),
+          LF.tween.to(this, { alpha: 1 }, 360, LF.ease.outQuad),
+        ]);
+      }
+      this.rotation = 0; this.scale.set(1); this.alpha = 1;
+      this.pivot.set(0, 0); this.position.set(C.GRID_X, C.GRID_Y);
+      if (this._maskGfx) this.mask = this._maskGfx;
+    }
+
     // Liefert flache Liste {col,row,sprite,def}
     all() {
       const out = [];
@@ -631,28 +816,21 @@
       return this.all().filter((c) => c.def.kind === "scatter").map((c) => c.sprite);
     }
 
-    // SCATTER-TENSION: ab 2 Scatter glüht nach dem Landen der Landing-Glow als Loop
-    // (~"2 Sek nach dem letzten Drop"), danach zurück auf statisch. Win-Burst kommt
-    // erst beim echten Trigger (siehe scatterWinBurst). No-op bei <2 oder ohne Sheet.
+    // SCATTER-TENSION: kurzer "Moment der Wahrheit" — die Orbits laufen aus dem Drop
+    // schon (Sweat steckt jetzt im _animateDrop). Sicherheitsnetz: Orbits sicher an.
     async scatterTension() {
       const sc = this._scatterSprites();
       if (sc.length < 2) return;
-      const an = LF.symbolAnims && LF.symbolAnims.SC;
-      // Voller Tension-Hold nur wenn ein Trigger möglich ist (3+). Bei genau 2 (häufig,
-      // kein Trigger) nur ein kurzer Glow -> kein totes ~1,3s-Warten auf jedem 2-Scatter-Spin
-      // (die eigentliche "kommt die 3.?"-Spannung lief schon im langsamen Anticipation-Drop).
-      const hold = sc.length >= 3 ? (C.TIMING.scatterTension || 1300) : (C.TIMING.scatterTensionShort || 350);
-      const useSheet = an && an.landing;
-      for (const sp of sc) useSheet ? sp.startAnimLoop(an.landing, C.TIMING.scatterLoop || 600, 1.34) : sp.startGlowPulse();
-      if (LF.sound) LF.sound.tension(0);
-      await LF.delay(hold);
-      for (const sp of sc) useSheet ? sp.stopAnimLoop(true) : sp.stopGlowPulse();
+      this._orbitScatters();
+      await LF.delay(sc.length >= 3 ? 320 : 160);
     }
 
-    // SCATTER-WIN-BURST: beim Free-Spins-Trigger einmalig auf allen Scattern (parallel).
+    // SCATTER-WIN-BURST: beim Free-Spins-Trigger. Orbits stoppen, großer Burst + Win-Sound.
     async scatterWinBurst() {
       const sc = this._scatterSprites();
       if (!sc.length) return;
+      this.stopAllOrbits();
+      if (LF.sound && LF.sound.scatterWin) LF.sound.scatterWin();
       const an = LF.symbolAnims && LF.symbolAnims.SC;
       const useSheet = an && an.win;
       await Promise.all(sc.map((sp) => useSheet ? sp.playScatterWin() : sp.scatterBurst()));

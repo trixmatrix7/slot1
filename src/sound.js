@@ -79,6 +79,82 @@
       }
     }
 
+    /* ---------- Datei-SFX (mit Cache); fehlt die Datei -> Fallback ---------- */
+    _loadSfx(url) {
+      if (!this._sfx) this._sfx = {};
+      if (this._sfx[url] !== undefined) return Promise.resolve(this._sfx[url]);
+      this._sfx[url] = null; // "lädt"
+      return fetch(url)
+        .then((r) => { if (!r.ok) throw 0; return r.arrayBuffer(); })
+        .then((ab) => this.ctx.decodeAudioData(ab))
+        .then((buf) => { this._sfx[url] = buf; return buf; })
+        .catch(() => { this._sfx[url] = false; return false; }); // false = fehlt dauerhaft
+    }
+    _playSfx(url, gain) {
+      if (!this.enabled || !this.ctx) return;
+      this._loadSfx(url).then((buf) => {
+        if (!buf || !this.ctx) return;
+        const src = this.ctx.createBufferSource(); src.buffer = buf;
+        const g = this.ctx.createGain(); g.gain.value = gain == null ? 0.6 : gain;
+        src.connect(g); g.connect(this.master); src.start(0);
+      });
+    }
+
+    /* ---------- Sweat-Loop (Anticipation); Datei optional ---------- */
+    startSweat() {
+      if (!this.ctx || this._sweatOn) return;
+      this._sweatOn = true;
+      this._loadSfx("assets/audio/sweat_loop.wav").then((buf) => {
+        if (!this._sweatOn || !this.ctx) return;
+        if (buf) {
+          const src = this.ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+          const g = this.ctx.createGain(); g.gain.value = 0.5;
+          src.connect(g); g.connect(this.master); src.start(0);
+          this._sweatNodes = { src, g };
+        } else {
+          this._sweatProc(); // prozeduraler steigender Puls als Fallback
+        }
+      });
+    }
+    _sweatProc() {
+      if (!this._sweatOn || !this.ctx) return;
+      this._tone({ freq: 220, dur: 0.5, type: "sawtooth", gain: 0.05, slideTo: 300 });
+      this._noise({ dur: 0.4, gain: 0.03, freq: 600, sweepTo: 1400, type: "bandpass" });
+      this._sweatTimer = setTimeout(() => this._sweatProc(), 480);
+    }
+    stopSweat() {
+      this._sweatOn = false;
+      if (this._sweatTimer) { clearTimeout(this._sweatTimer); this._sweatTimer = null; }
+      if (this._sweatNodes) {
+        try { this._sweatNodes.src.stop(); } catch (e) {}
+        try { this._sweatNodes.src.disconnect(); } catch (e) {}
+        this._sweatNodes = null;
+      }
+    }
+    // Ding, wenn während des Sweats ein (weiterer) Scatter aufgedeckt wird.
+    scatterReveal() {
+      this._tone({ freq: 1320, dur: 0.16, type: "sine", gain: 0.16 });
+      this._tone({ freq: 1980, dur: 0.18, type: "sine", gain: 0.10, when: 0.04 });
+      this._noise({ dur: 0.12, gain: 0.06, freq: 5000, sweepTo: 2500, type: "bandpass" });
+    }
+    // Großer Scatter-Win-Sound beim FS-Trigger; Datei optional.
+    scatterWin() {
+      this.stopSweat();
+      if (!this.ctx) return;
+      this._loadSfx("assets/audio/scatter_win.wav").then((buf) => {
+        if (buf) { this._playSfx("assets/audio/scatter_win.wav", 0.7); return; }
+        // Fallback-Fanfare
+        const notes = [523, 659, 784, 1046, 1318];
+        for (let i = 0; i < notes.length; i++) this._tone({ freq: notes[i], dur: 0.32, type: "triangle", gain: 0.16, when: i * 0.085 });
+        this._noise({ dur: 0.5, gain: 0.05, freq: 800, sweepTo: 4000, type: "bandpass" });
+      });
+    }
+    // Übergangs-Whoosh (Grid dreht sich ein).
+    whoosh() {
+      this._noise({ dur: 0.5, gain: 0.12, freq: 300, sweepTo: 3000, type: "bandpass" });
+      this._tone({ freq: 400, dur: 0.45, type: "sine", gain: 0.08, slideTo: 90 });
+    }
+
     _tone({ freq = 440, dur = 0.12, type = "sine", gain = 0.2, attack = 0.005, slideTo = null, when = 0 }) {
       if (!this.enabled || !this.ctx) return;
       const t = this.ctx.currentTime + when;

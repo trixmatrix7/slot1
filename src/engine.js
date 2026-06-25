@@ -104,13 +104,12 @@
         // Guaranteed-Bonus-Spin: genau N Scatter droppen (mit Sweat) ...
         if (LF.sound) LF.sound.spin();
         await this.grid.spawnGuaranteed(scatters, true);
-        await this.grid.scatterTension();   // Landing-Glow-Tension
-        await this.grid.scatterWinBurst();  // Scatter-Win-Burst (Kauf -> immer Trigger)
-        if (LF.sound) LF.sound.scatter();
+        await this.grid.scatterTension();   // Moment der Wahrheit (Orbits laufen)
+        await this.grid.scatterWinBurst();  // Scatter-Win-Animation (Kauf -> immer Trigger)
         await LF.delay(300);
-        // ... dann Free-Games-Intro mit START ...
-        await this.ui.showFreeSpinsIntro(award);
-        // ... dann die Free Spins.
+        await this.grid.playFSTransition(); // Grid dreht sich in sich ein
+        await this.ui.showFreeSpinsIntro(award); // Intro öffnet sich
+        await this.grid.restoreFromTransition(); // Grid zurücksetzen
         await this._runFreeSpins(award);
 
         await this._settleWin();
@@ -151,11 +150,14 @@
 
         const award = LF.Math.triggerAward(base.scatters);
         if (award > 0) {
-          await this.grid.scatterWinBurst(); // Scatter-Win-Burst beim Trigger
-          if (LF.sound) LF.sound.scatter();
-          await LF.delay(400);
-          await this.ui.showFreeSpinsIntro(award); // Free-Games-Intro mit START
+          await this.grid.scatterWinBurst();        // Scatter-Win-Animation (stoppt Orbits) + Win-Sound
+          await LF.delay(300);
+          await this.grid.playFSTransition();       // Grid dreht sich in sich ein
+          await this.ui.showFreeSpinsIntro(award);  // Intro öffnet sich (START)
+          await this.grid.restoreFromTransition();  // Grid für die Free Spins zurücksetzen
           await this._runFreeSpins(award);
+        } else {
+          this.grid.stopAllOrbits();                // kein Trigger -> Orbits ausblenden
         }
 
         await this._settleWin();
