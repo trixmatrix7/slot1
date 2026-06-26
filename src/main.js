@@ -6,16 +6,16 @@
   const C = LF.CONFIG;
 
   // --- Pixi-App (transparent, damit #bg durchscheint) ---
-  // Backbuffer-Auflösung wird in resize() an die Anzeige angepasst, ABER auf 2× gedeckelt:
-  // darüber hinaus (High-DPI/Fullscreen) explodiert die Fill-Rate (jeder additive Glow/Scrim
-  // wird über den ganzen Buffer gerendert) ohne sichtbaren Gewinn bei den weichen PNG/Glow-Arts.
-  // antialias aus: Art ist sprite-basiert (roundPixels gesetzt) -> MSAA kostet global viel, bringt kaum.
+  // Wir rendern in ECHTEN Bildschirm-Pixeln: die Renderer-Auflösung wird in resize()
+  // dynamisch an die Anzeige angepasst -> 1:1, gestochen scharf. Antialias an für glatte
+  // Kanten (Rahmen/Ringe/Glows) -> Animationen wirken sauber statt kantig.
+  // powerPreference: bevorzugt die dedizierte GPU (hilft auf Laptops mit Dual-GPU).
   const app = new PIXI.Application({
     width: C.DESIGN_W,
     height: C.DESIGN_H,
     backgroundAlpha: 0,
-    antialias: false,
-    resolution: 1,        // Start; wird in resize() (auf max. 2×) überschrieben
+    antialias: true,
+    resolution: 2,        // Start; wird in resize() überschrieben
     autoDensity: false,
     powerPreference: "high-performance",
   });
@@ -73,11 +73,9 @@
     screenEl.style.width = Math.floor(w) + "px";
     screenEl.style.height = Math.floor(h) + "px";
 
-    // Renderer-Auflösung = Geräte-Pixel pro Design-Einheit, GEDECKELT auf 2×.
-    // Cap verhindert 8–13MP-Backbuffer auf High-DPI-Fullscreen (Haupt-Lag-Quelle auf Vercel);
-    // 2× ist für weiche Glow/Sprite-Arts visuell ununterscheidbar von 3–4×.
+    // Renderer-Auflösung = echte Geräte-Pixel pro Design-Einheit -> 1:1 scharf (bis 4×).
     const dpr = window.devicePixelRatio || 1;
-    const res = Math.max(1, Math.min(2, (w * dpr) / C.DESIGN_W));
+    const res = Math.max(1, Math.min(4, (w * dpr) / C.DESIGN_W));
     if (Math.abs(app.renderer.resolution - res) > 0.01) {
       app.renderer.resolution = res;
       if (app.renderer.events) app.renderer.events.resolution = res;

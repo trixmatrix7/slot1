@@ -238,12 +238,16 @@
   LF.prefetchOverlays = function () { Object.keys(OVERLAY_FILES).forEach((k) => LF.ensureOverlay(k)); };
 
   LF.loadUIAssets = async function () {
-    // Nur die kleinen Control-Bar-Icons (~120KB) blockieren den Start.
     const files = {
       coin: "coin", sndOn: "snd_on", sndOff: "snd_off", help: "help", dice: "dice",
       clusterIdle: "cluster_idle", clusterStop: "cluster_stop",
     };
-    await Promise.all(Object.keys(files).map((k) => loadImgTexture(k, "assets/ui/" + files[k] + ".png")));
+    // Icons + die 6 GENUTZTEN Menü-Overlays direkt beim Start laden (längerer Ladebalken,
+    // dafür sofort scharf & bereit, keine Lazy-Verzögerung). Die 5 ungenutzten bleiben außen vor.
+    await Promise.all([
+      ...Object.keys(files).map((k) => loadImgTexture(k, "assets/ui/" + files[k] + ".png")),
+      ...Object.keys(OVERLAY_FILES).map((k) => LF.ensureOverlay(k)),
+    ]);
     return LF.uiTextures;
   };
 
