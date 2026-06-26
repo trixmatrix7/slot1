@@ -192,9 +192,23 @@
     // sammeln (OHNE Multiplikator — der kommt in FS am Spin-Ende). Liefert {winX, scatters}.
     async _resolveBoard() {
       const res = LF.Math.evaluate(this.grid.toIdGrid());
-      if (res.totalX > 0) {
+      const lines = (res.lines || []).filter((ln) => ln.cells && ln.cells.length);
+      if (lines.length) {
+        // SEQUENZIELL: jede Symbol-Verbindung nacheinander hervorheben (nicht alle gleichzeitig).
+        // Reihenfolge = Symbol-Wert aufsteigend (K, Q, ... BOSS2) -> Aufbau zum größten Win.
+        let step = 0;
+        for (const ln of lines) {
+          step++;
+          this._runningX += ln.x;
+          if (LF.sound) LF.sound.connect(step);             // steigende Tonhöhe pro Verbindung
+          this.ui.setWin(this._runningX * this.stake);      // Win zählt pro Verbindung hoch
+          await this.grid.highlightWins(ln.cells);
+          if (step < lines.length) await LF.delay(C.TIMING.stepPause || 150); // Pause zwischen Connections
+        }
+      } else if (res.totalX > 0) {
+        // Fallback (sollte nicht auftreten): Summe ohne Linien-Detail.
         this._runningX += res.totalX;
-        if (LF.sound) LF.sound.connect(1); // ein Connection-Klick pro Gewinn-Spin
+        if (LF.sound) LF.sound.connect(1);
         this.ui.setWin(this._runningX * this.stake);
         await this.grid.highlightWins(res.winCells);
       }

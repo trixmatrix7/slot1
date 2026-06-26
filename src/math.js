@@ -172,15 +172,18 @@
     const C = LF.CONFIG, ID = LF.SYMBOL_BY_ID;
     const ws = M.waysEval(idGrid);
     // Gewinn-Zellen: pro Line alle Zellen mit dem Symbol/Wild auf den ersten N Walzen.
+    // ln.cells = die Zellen DIESER Line (für sequenzielles Highlight nacheinander).
     const cellSet = new Set();
     for (const ln of ws.lines) {
+      const cells = [];
       for (let c = 0; c < ln.reels; c++) {
         const col = idGrid[c];
         for (let r = 0; r < col.length; r++) {
           const id = col[r]; if (id == null) continue;
-          if (id === ln.id || ID[id].kind === "wild") cellSet.add(c + "," + r);
+          if (id === ln.id || ID[id].kind === "wild") { cells.push([c, r]); cellSet.add(c + "," + r); }
         }
       }
+      ln.cells = cells;
     }
     const winCells = Array.from(cellSet).map((k) => k.split(",").map(Number));
     let scatters = 0;

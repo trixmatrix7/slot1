@@ -348,7 +348,7 @@
 
       // 1) Anticipations-Dip
       await LF.tween.to(sp.scale, { x: b * 0.88, y: b * 0.88 }, 85, LF.ease.outQuad);
-      if (this._dead) { if (ring.parent) ring.parent.removeChild(ring); ring.destroy(); return; }
+      if (this._dead) { if (ring.parent) ring.parent.removeChild(ring); if (!ring.destroyed) ring.destroy(); return; }
 
       // 2) Pop + Flare + Ring + Wobble (Intensität ~30% reduziert)
       const wob = LF.tween.to(sp, { rotation: 0.05 }, 110, LF.ease.outQuad)
@@ -364,7 +364,7 @@
         LF.tween.to(ring, { alpha: 0 }, 330, LF.ease.outQuad),
         wob,
       ]);
-      if (ring.parent) ring.parent.removeChild(ring); ring.destroy();
+      if (ring.parent) ring.parent.removeChild(ring); if (!ring.destroyed) ring.destroy();
       if (this._dead) return;
 
       // 3) Settle leicht vergrößert + glühend (das Removal burstet danach weiter)
