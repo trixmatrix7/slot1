@@ -141,7 +141,7 @@
     dropStagger: 70,     // Versatz pro Spalte beim Reinfallen
     dropDuration: 430,   // Falldauer pro Symbol
     winHighlight: 500,   // Win-Anim-Dauer: 30 Frames über 500ms = exakt 1 Frame/60Hz-Tick (gleichmäßig)
-    winHold: 240,        // Ways: volles erleuchtetes Board am Ende kurz halten, bevor es ausklingt
+    winHold: 120,        // Ways: volles erleuchtetes Board nur kurz halten (kein langes Einfrieren), dann sanft ausklingen
     connectGap: 70,      // Ways: kurze, fließende Trennung zwischen den sequenziellen Verbindungen
     landingDur: 260,     // Dauer der Landing-Animation (fire-and-forget beim Landen) — kurz/snappy
     tumbleDrop: 380,     // Nachrutschen nach Entfernen

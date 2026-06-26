@@ -16,6 +16,8 @@
     outQuad: (t) => 1 - (1 - t) * (1 - t),
     outCubic: (t) => 1 - Math.pow(1 - t, 3),
     inQuad: (t) => t * t,
+    // weich rein UND raus -> startet sanft (kein "Schnappen" nach einem Halt), endet sanft
+    inOutQuad: (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2),
     // "Bounce/Settle" am Ende eines Falls
     outBack: (t) => {
       const c1 = 1.70158, c3 = c1 + 1;

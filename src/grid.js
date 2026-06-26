@@ -393,11 +393,13 @@
       if (this._dead) return;
       const b = this._spBase || 1;
       LF.tween.killOf(this.sprite.scale); LF.tween.killOf(this.glow); LF.tween.killOf(this.backdrop); LF.tween.killOf(this.flash);
+      // Sanfter, gleichmäßiger Zoom zurück auf Ursprung: inOutQuad startet WEICH -> kein
+      // Losschnappen nach dem kurzen Halten (das war der "Pause-Ruckler"). Glow/Backdrop faden mit.
       await Promise.all([
-        LF.tween.to(this.sprite.scale, { x: b, y: b }, 170, LF.ease.outQuad),
-        LF.tween.to(this.glow, { alpha: 0 }, 170, LF.ease.outQuad),
-        LF.tween.to(this.backdrop, { alpha: 0 }, 170, LF.ease.outQuad),
-        LF.tween.to(this.flash, { alpha: 0 }, 120, LF.ease.outQuad),
+        LF.tween.to(this.sprite.scale, { x: b, y: b }, 240, LF.ease.inOutQuad),
+        LF.tween.to(this.glow, { alpha: 0 }, 240, LF.ease.inOutQuad),
+        LF.tween.to(this.backdrop, { alpha: 0 }, 240, LF.ease.inOutQuad),
+        LF.tween.to(this.flash, { alpha: 0 }, 160, LF.ease.outQuad),
       ]);
       if (!this._dead) this.sprite.rotation = 0;
     }
