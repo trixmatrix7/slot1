@@ -6,16 +6,18 @@
   const C = LF.CONFIG;
 
   // --- Pixi-App (transparent, damit #bg durchscheint) ---
-  // Wir rendern in ECHTEN Bildschirm-Pixeln: die Renderer-Auflösung wird in
-  // resize() dynamisch so gesetzt, dass der Backbuffer exakt der angezeigten
-  // Pixelzahl entspricht -> 1:1, immer gestochen scharf (kein Hoch-/Runterskalieren).
+  // Backbuffer-Auflösung wird in resize() an die Anzeige angepasst, ABER auf 2× gedeckelt:
+  // darüber hinaus (High-DPI/Fullscreen) explodiert die Fill-Rate (jeder additive Glow/Scrim
+  // wird über den ganzen Buffer gerendert) ohne sichtbaren Gewinn bei den weichen PNG/Glow-Arts.
+  // antialias aus: Art ist sprite-basiert (roundPixels gesetzt) -> MSAA kostet global viel, bringt kaum.
   const app = new PIXI.Application({
     width: C.DESIGN_W,
     height: C.DESIGN_H,
     backgroundAlpha: 0,
-    antialias: true,
-    resolution: 2,        // Start; wird in resize() überschrieben
+    antialias: false,
+    resolution: 1,        // Start; wird in resize() (auf max. 2×) überschrieben
     autoDensity: false,
+    powerPreference: "high-performance",
   });
   document.getElementById("game").appendChild(app.view);
   app.stage.eventMode = "static";
@@ -71,9 +73,11 @@
     screenEl.style.width = Math.floor(w) + "px";
     screenEl.style.height = Math.floor(h) + "px";
 
-    // Renderer-Auflösung = echte Geräte-Pixel pro Design-Einheit -> 1:1 scharf.
+    // Renderer-Auflösung = Geräte-Pixel pro Design-Einheit, GEDECKELT auf 2×.
+    // Cap verhindert 8–13MP-Backbuffer auf High-DPI-Fullscreen (Haupt-Lag-Quelle auf Vercel);
+    // 2× ist für weiche Glow/Sprite-Arts visuell ununterscheidbar von 3–4×.
     const dpr = window.devicePixelRatio || 1;
-    const res = Math.max(1, Math.min(4, (w * dpr) / C.DESIGN_W));
+    const res = Math.max(1, Math.min(2, (w * dpr) / C.DESIGN_W));
     if (Math.abs(app.renderer.resolution - res) > 0.01) {
       app.renderer.resolution = res;
       if (app.renderer.events) app.renderer.events.resolution = res;
@@ -94,6 +98,7 @@
       return;
     }
     ui.refreshUITextures(); // Control-Bar-Bilder jetzt einsetzen (UI wurde vor dem Laden gebaut)
+    if (LF.prefetchOverlays) LF.prefetchOverlays(); // Menü-Overlays im Hintergrund warmladen (nicht blockierend)
     await intro.showSplash();          // wartet auf Klick (schaltet Audio frei)
     await intro.finish();              // Intro ausblenden
     grid.spawnAll(false);              // Startboard (ohne Anticipation/Sirene)

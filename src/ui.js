@@ -642,9 +642,10 @@
     }
 
     // === RNG SETTINGS / PROVABLY FAIR — echte PNG-Tabs (Overview/Seeds/Verify) ===
-    _renderFair() {
+    async _renderFair() {
       const tab = this._fairTab || "overview";
       const key = tab === "seeds" ? "ovRngSeeds" : tab === "verify" ? "ovRngVerify" : "ovRngOverview";
+      await LF.ensureOverlay(key);
       // Breite über alle Tabs gleich (~430), Höhe je nach Tab; nicht zu groß, mittig.
       const P = this._pngPanel(key, 430, 640);
       const oc = LF.onchain || {}, cfg = oc.config || {};
@@ -1195,8 +1196,9 @@
     }
 
     // === SYSTEM SETTINGS (Sound/Music/Fullscreen) — öffnet über das Sound-Icon ===
-    openSettingsMenu() {
+    async openSettingsMenu() {
       // PNG-Panel (Titel/Labels/Beschreibungen gebacken) + funktionale Toggles drüber.
+      await LF.ensureOverlay("ovSystem"); // lazy: Overlay garantiert geladen, bevor _pngPanel misst
       const P = this._pngPanel("ovSystem", 472, 472);
       const rows = [
         { get: () => !!(LF.sound && LF.sound.musicEnabled), set: (v) => LF.sound && LF.sound.setMusic(v) },
@@ -1210,8 +1212,9 @@
     }
 
     // === AUTOPLAY SETTINGS (Turbo/Quick/Skip Rocker + Anzahl-Slider + START AUTOPLAY) ===
-    openAutoplayMenu() {
+    async openAutoplayMenu() {
       // PNG-Panel (Titel + Toggle-Labels + "NUMBER OF AUTOSPINS" gebacken) + Controls drüber.
+      await LF.ensureOverlay("ovAutoplay");
       const P = this._pngPanel("ovAutoplay", 662, 470);
       const groups = [
         { set: () => this._setSpeed(2), get: () => (this._turboLevel || 0) === 2 },
@@ -1234,8 +1237,9 @@
     }
 
     // === BET (BET / COIN VALUE / TOTAL BET — Stepper + Coin + BET MAX) ===
-    openBetMenu() {
+    async openBetMenu() {
       // PNG-Panel (Titel + BET/COIN VALUE/TOTAL BET Labels gebacken) + Stepper/Werte drüber.
+      await LF.ensureOverlay("ovBet");
       const P = this._pngPanel("ovBet", 360, 552);
       const betStr = this.betText ? this.betText.text : C.BET_LEVELS[C.DEFAULT_BET_INDEX].toFixed(2);
       const rows = [

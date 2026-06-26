@@ -54,7 +54,9 @@
   // Premiums: Landing (beim Landen) + Win (beim Connecten). Royals/Non-Premium ganz ohne Anim.
   // Scatter (SC) wird NICHT generisch animiert -> eigener Spezial-Flow (Tension-Glow + Win-Burst).
   // ALT (aus den vorigen Charakteren gebacken: Rapper/Biker/Handschellen/Whiskey).
-  // Passt NICHT zu den neuen Prison-Symbolen -> deaktiviert. Restore: SYMBOL_ANIM = SYMBOL_ANIM_OLD.
+  // Passt NICHT zu den neuen Prison-Symbolen -> deaktiviert. Die zugehörigen 38MB-Sheets
+  // in assets/anim/ wurden aus dem Repo entfernt (totes Deploy-Gewicht); Template bleibt als
+  // Referenz für künftige, passende Sheets stehen.
   const SYMBOL_ANIM_OLD = {
     BOSS1:   { landing: ANIM_PATH + "high_a_landing.png", win: ANIM_PATH + "high_a_win.png", cols: 6, rows: 5, frames: 30 }, // high A (Rapper)
     BOSS2:   { landing: ANIM_PATH + "high_b_landing.png", win: ANIM_PATH + "high_b_win.png", cols: 6, rows: 5, frames: 30 }, // high B (Biker)

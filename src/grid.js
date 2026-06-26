@@ -287,7 +287,11 @@
       LF.tween.killOf(this.sprite); LF.tween.killOf(this.sprite.scale); LF.tween.killOf(this.sprite.position);
       LF.tween.killOf(this.glow); LF.tween.killOf(this.flash); LF.tween.killOf(this.flash.scale); LF.tween.killOf(this.backdrop);
       if (this.orbit) { LF.tween.killOf(this.orbit); LF.tween.killOf(this._orbitTrack); }
-      super.destroy(opts);
+      // PIXI.Text-Label hat eine EIGENE Canvas-/GPU-Textur -> separat freigeben, sonst leakt
+      // sie pro Spin (25 Kacheln × hunderte Spins). Danach Kinder mit zerstören; texture:false
+      // bewahrt die geteilten Modul-Texturen (glow/comet/track/backdrop/Symbol-Sheets).
+      try { if (this.label && !this.label.destroyed) this.label.destroy({ texture: true, baseTexture: true }); } catch (e) {}
+      super.destroy({ children: true, texture: false });
     }
 
     setSymbol(def) {

@@ -19,7 +19,7 @@
       this.musicBuffer = null;
       this.musicSource = null;
       this._musicLoading = false;
-      this.musicUrl = "assets/audio/music_loop.wav";
+      this.musicUrl = "assets/audio/music_loop.ogg";
       this.musicVolume = 0.42;
     }
 
@@ -104,7 +104,7 @@
     startSweat() {
       if (!this.ctx || this._sweatOn) return;
       this._sweatOn = true;
-      this._loadSfx("assets/audio/sweat_loop.wav").then((buf) => {
+      this._loadSfx("assets/audio/sweat_loop.ogg").then((buf) => {
         if (!this._sweatOn || !this.ctx) return;
         if (buf) {
           const src = this.ctx.createBufferSource(); src.buffer = buf; src.loop = true;
@@ -137,17 +137,13 @@
       this._tone({ freq: 1980, dur: 0.18, type: "sine", gain: 0.10, when: 0.04 });
       this._noise({ dur: 0.12, gain: 0.06, freq: 5000, sweepTo: 2500, type: "bandpass" });
     }
-    // Großer Scatter-Win-Sound beim FS-Trigger; Datei optional.
+    // Großer Scatter-Win-Sound beim FS-Trigger (prozedurale Fanfare; keine Datei -> kein 404).
     scatterWin() {
       this.stopSweat();
       if (!this.ctx) return;
-      this._loadSfx("assets/audio/scatter_win.wav").then((buf) => {
-        if (buf) { this._playSfx("assets/audio/scatter_win.wav", 0.7); return; }
-        // Fallback-Fanfare
-        const notes = [523, 659, 784, 1046, 1318];
-        for (let i = 0; i < notes.length; i++) this._tone({ freq: notes[i], dur: 0.32, type: "triangle", gain: 0.16, when: i * 0.085 });
-        this._noise({ dur: 0.5, gain: 0.05, freq: 800, sweepTo: 4000, type: "bandpass" });
-      });
+      const notes = [523, 659, 784, 1046, 1318];
+      for (let i = 0; i < notes.length; i++) this._tone({ freq: notes[i], dur: 0.32, type: "triangle", gain: 0.16, when: i * 0.085 });
+      this._noise({ dur: 0.5, gain: 0.05, freq: 800, sweepTo: 4000, type: "bandpass" });
     }
     // Übergangs-Whoosh (Grid dreht sich ein).
     whoosh() {

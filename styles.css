@@ -30,9 +30,8 @@ html, body {
 }
 
 /* ---- HINTERGRUND -------------------------------------------------
-   Ersetze hier dein Bild:
-      background: url("assets/background.png") center/cover no-repeat;
-   und lösche den Platzhalter-Verlauf + #bg-hint.
+   Aktiv genutzt: assets/background.jpg (JPEG-optimiert, siehe Regel unten).
+   Alternative: assets/background_alt.jpg (Zellenblock).
 ------------------------------------------------------------------ */
 #bg {
   position: absolute;

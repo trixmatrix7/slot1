@@ -206,30 +206,44 @@
      LF.uiTextures[name] = PIXI.Texture. Fehlt eins -> still übersprungen.
      ============================================================ */
   LF.uiTextures = {};
+  // Bild -> Textur laden (still scheitern -> resolve).
+  function loadImgTexture(k, src) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => { try { LF.uiTextures[k] = PIXI.Texture.from(img); } catch (e) {} resolve(LF.uiTextures[k] || null); };
+      img.onerror = () => resolve(null);
+      img.src = src;
+    });
+  }
+
+  // Menü-Overlay-Panels (volle Design-PNGs). NUR die tatsächlich verwendeten 6 — Buy/Info/
+  // Paytable/Confirm-Dialoge rendern generierte Panels (hPanel), deren PNGs wurden nie genutzt
+  // (4.26MB unnötiger Startup-Download -> entfernt). Diese 6 werden LAZY geladen (nicht blockierend):
+  // Hintergrund-Prefetch im Splash-Gap + ensureOverlay() garantiert beim Menü-Öffnen.
+  const OVERLAY_FILES = {
+    ovSystem: "system", ovAutoplay: "autoplay", ovBet: "bet",
+    ovRngOverview: "rng_overview", ovRngSeeds: "rng_seeds", ovRngVerify: "rng_verify",
+  };
+  LF._ovPromise = {};
+  LF.ensureOverlay = function (key) {
+    if (LF.uiTextures[key]) return Promise.resolve(LF.uiTextures[key]);
+    if (LF._ovPromise[key]) return LF._ovPromise[key];
+    const file = OVERLAY_FILES[key];
+    if (!file) return Promise.resolve(null);
+    LF._ovPromise[key] = loadImgTexture(key, "assets/ui/overlays/" + file + ".png");
+    return LF._ovPromise[key];
+  };
+  // Nicht-blockierender Hintergrund-Warmup aller Menü-Overlays (nach dem Start aufrufen).
+  LF.prefetchOverlays = function () { Object.keys(OVERLAY_FILES).forEach((k) => LF.ensureOverlay(k)); };
+
   LF.loadUIAssets = async function () {
+    // Nur die kleinen Control-Bar-Icons (~120KB) blockieren den Start.
     const files = {
       coin: "coin", sndOn: "snd_on", sndOff: "snd_off", help: "help", dice: "dice",
       clusterIdle: "cluster_idle", clusterStop: "cluster_stop",
     };
-    // Fertige Overlay-Panels (volle PNGs aus dem Design) -> als Hintergrund der Menüs
-    const overlays = {
-      ovSystem: "system", ovAutoplay: "autoplay", ovBet: "bet", ovBuy: "buy",
-      ovConfirmBuy: "confirm_buy", ovConfirmFeature: "confirm_feature",
-      ovInfo: "info", ovPaytable: "paytable",
-      ovRngOverview: "rng_overview", ovRngSeeds: "rng_seeds", ovRngVerify: "rng_verify",
-    };
-    const load = (k, src) =>
-      new Promise((resolve) => {
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.onload = () => { try { LF.uiTextures[k] = PIXI.Texture.from(img); } catch (e) {} resolve(); };
-        img.onerror = () => resolve();
-        img.src = src;
-      });
-    await Promise.all([
-      ...Object.keys(files).map((k) => load(k, "assets/ui/" + files[k] + ".png")),
-      ...Object.keys(overlays).map((k) => load(k, "assets/ui/overlays/" + overlays[k] + ".png")),
-    ]);
+    await Promise.all(Object.keys(files).map((k) => loadImgTexture(k, "assets/ui/" + files[k] + ".png")));
     return LF.uiTextures;
   };
 
