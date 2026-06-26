@@ -866,9 +866,11 @@
       return g;
     }
 
-    // WAYS-Gewinn: die Gewinn-Zellen aufleuchten lassen (KEIN Entfernen), dann ausklingen.
-    async highlightWins(cells) {
-      if (!cells || !cells.length) return;
+    // WAYS: eine Verbindung aufpoppen — Symbole BLEIBEN leuchten (KEIN Reset), damit sich der
+    // Gewinn sequenziell aufbauen kann statt zwischendrin flach zurückzuspringen. Liefert die
+    // gepoppten Sprites zurück (für das gemeinsame Ausklingen am Ende).
+    async popWins(cells) {
+      if (!cells || !cells.length) return [];
       const sprites = [], plays = [];
       for (const cell of cells) {
         const c = cell[0], r = cell[1];
@@ -876,8 +878,19 @@
         if (sp && !sp._dead) { sprites.push(sp); plays.push(sp.playWin()); }
       }
       await Promise.all(plays);
-      await LF.delay(C.TIMING.winHold || 220);          // kurz halten -> Gewinn klar sichtbar
-      await Promise.all(sprites.map((sp) => sp.resetWin()));
+      return sprites;
+    }
+    // Alle markierten Gewinn-Symbole gemeinsam sauber ausklingen lassen (EIN Clear am Ende).
+    async clearWins(sprites) {
+      if (!sprites || !sprites.length) return;
+      await Promise.all(sprites.map((sp) => (sp && !sp._dead ? sp.resetWin() : Promise.resolve())));
+    }
+    // Kombiniert (Einzelverbindung/Fallback): poppen -> halten -> ausklingen.
+    async highlightWins(cells) {
+      const sprites = await this.popWins(cells);
+      if (!sprites.length) return;
+      await LF.delay(C.TIMING.winHold || 220);
+      await this.clearWins(sprites);
     }
 
     // [UNUSED ab Ways-Umstellung — kein Tumble mehr. Bleibt für evtl. Cascade-Modus.]

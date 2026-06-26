@@ -194,17 +194,22 @@
       const res = LF.Math.evaluate(this.grid.toIdGrid());
       const lines = (res.lines || []).filter((ln) => ln.cells && ln.cells.length);
       if (lines.length) {
-        // SEQUENZIELL: jede Symbol-Verbindung nacheinander hervorheben (nicht alle gleichzeitig).
-        // Reihenfolge = Symbol-Wert aufsteigend (K, Q, ... BOSS2) -> Aufbau zum größten Win.
+        // SEQUENZIELL & FLÜSSIG: jede Verbindung poppt nacheinander auf und BLEIBT leuchten
+        // (Reihenfolge = Symbol-Wert aufsteigend, Aufbau zum größten Win). Erst am ENDE klingen
+        // ALLE gemeinsam aus -> kein Zurückschrumpfen/Stop-and-Go zwischen den Verbindungen.
+        const lit = new Set();
         let step = 0;
         for (const ln of lines) {
           step++;
           this._runningX += ln.x;
           if (LF.sound) LF.sound.connect(step);             // steigende Tonhöhe pro Verbindung
           this.ui.setWin(this._runningX * this.stake);      // Win zählt pro Verbindung hoch
-          await this.grid.highlightWins(ln.cells);
-          if (step < lines.length) await LF.delay(C.TIMING.stepPause || 150); // Pause zwischen Connections
+          const sprites = await this.grid.popWins(ln.cells);
+          sprites.forEach((sp) => lit.add(sp));
+          if (step < lines.length) await LF.delay(C.TIMING.connectGap || 70); // kurze, fließende Trennung
         }
+        await LF.delay(C.TIMING.winHold || 220);            // volles Board kurz halten
+        await this.grid.clearWins(Array.from(lit));         // ein sauberes gemeinsames Ausklingen
       } else if (res.totalX > 0) {
         // Fallback (sollte nicht auftreten): Summe ohne Linien-Detail.
         this._runningX += res.totalX;
