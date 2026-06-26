@@ -49,101 +49,73 @@
     return _cumPSyms[_cumPSyms.length - 1];
   };
 
-  // Auszahlung eines Symbols bei gegebener Anzahl (× Gesamteinsatz),
+  // WAYS-Pay eines Symbols bei N zusammenhängenden Walzen (von links), PRO WAY,
   // skaliert mit PAY_SCALE (RTP-Stellschraube).
-  M.payX = function (def, count) {
+  M.waysPay = function (def, reels) {
     if (!def.pays) return 0;
     let best = 0;
-    for (const th in def.pays) if (count >= +th) best = Math.max(best, def.pays[th]);
+    for (const th in def.pays) if (reels >= +th) best = Math.max(best, def.pays[th]);
     return best * (LF.CONFIG.PAY_SCALE || 1);
   };
 
-  // Gewinn-Auswertung aus Symbol-Zählungen. Wild zählt zu jedem Pay-Symbol.
-  // -> { totalX, winning:Set<id> }
-  M.countWins = function (countsById, wildCount) {
-    const ID = LF.SYMBOL_BY_ID;
-    let totalX = 0;
-    const winning = new Set();
-    for (const id in countsById) {
-      const def = ID[id];
-      const eff = countsById[id] + wildCount;
-      const x = M.payX(def, eff);
-      if (x > 0) { totalX += x; winning.add(id); }
+  // WAYS-Auswertung. reels[c] = Array der Symbol-ids in Walze c (Länge ROWS).
+  // Ein Symbol gewinnt, wenn es (mit Wild als Joker) ab Walze 1 auf
+  // zusammenhängenden Walzen liegt. Ways = Produkt der Treffer pro Walze.
+  // Gewinn = waysPay(reels) × Ways. Jedes Symbol zahlt eigenständig (Summe).
+  // -> { totalX, lines:[{id,reels,ways,x}] }
+  M.waysEval = function (reels) {
+    const C = LF.CONFIG, ID = LF.SYMBOL_BY_ID, minR = C.MIN_WAYS_REELS || 3;
+    const cols = reels.length;
+    const wildR = new Array(cols).fill(0);
+    const cntR = new Array(cols);
+    for (let c = 0; c < cols; c++) {
+      cntR[c] = {};
+      const col = reels[c];
+      for (let r = 0; r < col.length; r++) {
+        const id = col[r]; if (id == null) continue;
+        const k = ID[id].kind;
+        if (k === "wild") wildR[c]++;
+        else if (k === "scatter") { /* zählt nicht für Pays */ }
+        else cntR[c][id] = (cntR[c][id] || 0) + 1;
+      }
     }
-    return { totalX, winning };
+    let totalX = 0; const lines = [];
+    for (const sym of C.SYMBOLS) {
+      if (sym.kind === "wild" || sym.kind === "scatter" || !sym.pays) continue;
+      let ways = 1, nr = 0;
+      for (let c = 0; c < cols; c++) {
+        const cnt = (cntR[c][sym.id] || 0) + wildR[c];
+        if (cnt === 0) break;
+        ways *= cnt; nr++;
+      }
+      if (nr >= minR) {
+        const pay = M.waysPay(sym, nr);
+        if (pay > 0) { const x = pay * ways; totalX += x; lines.push({ id: sym.id, reels: nr, ways, x }); }
+      }
+    }
+    return { totalX, lines };
   };
 
-  /* ---------- Flaches Modell (Simulator) ---------- */
-  function fillArr(rng, n) {
-    const cap = LF.CONFIG.MAX_SCATTERS || 4;
-    const a = new Array(n);
-    let sc = 0;
-    for (let i = 0; i < n; i++) {
-      let s = M.pick(rng);
-      if (s.kind === "scatter") { if (sc >= cap) s = M.pickNoSc(rng); else sc++; }
-      a[i] = s.id;
+  /* ---------- Sim/Modell (frische Walzen, KEIN Tumble) ---------- */
+  function fillReels(rng) {
+    const C = LF.CONFIG, cap = C.MAX_SCATTERS || 5;
+    const reels = new Array(C.COLS); let sc = 0;
+    for (let c = 0; c < C.COLS; c++) {
+      reels[c] = new Array(C.ROWS);
+      for (let r = 0; r < C.ROWS; r++) {
+        let s = M.pick(rng);
+        if (s.kind === "scatter") { if (sc >= cap) s = M.pickNoSc(rng); else sc++; }
+        reels[c][r] = s.id;
+      }
     }
-    return a;
+    return reels;
   }
-  // Ein frisches Board als flaches Array (für Simulator-Detailstatistik).
-  M.newBoard = function (rng) { return fillArr(rng, LF.CONFIG.COLS * LF.CONFIG.ROWS); };
-  function arrCounts(arr) {
-    const ID = LF.SYMBOL_BY_ID;
-    const m = {};
-    let wild = 0;
-    for (let i = 0; i < arr.length; i++) {
-      const id = arr[i], k = ID[id].kind;
-      if (k === "wild") wild++;
-      else if (k === "scatter") { /* zählt nicht für Pays */ }
-      else m[id] = (m[id] || 0) + 1;
-    }
-    return { m, wild };
-  }
-  function countScatters(arr) {
+  M.newBoardReels = fillReels;
+  function countScattersReels(reels) {
     let s = 0;
-    for (let i = 0; i < arr.length; i++) if (arr[i] === "SC") s++;
-    return s;
+    for (let c = 0; c < reels.length; c++) for (let r = 0; r < reels[c].length; r++) if (reels[c][r] === "SC") s++;
+    return Math.min(s, LF.CONFIG.MAX_SCATTERS || 5);
   }
-
-  // Ein Board komplett auswerten (Tumble-Schleife). multState trägt den
-  // FS-Multiplikator über das ganze Feature. Liefert { winX, scatters }.
-  // Liefert den BASIS-Win des Spins (ohne FS-Multiplikator) + Scatter (capped).
-  // Der FS-Multiplikator wird in runFreeSpins am Spin-ENDE angewandt.
-  M.resolveArr = function (rng, arr, isFS) {
-    const ID = LF.SYMBOL_BY_ID;
-    const C = LF.CONFIG;
-    const cap = C.MAX_SCATTERS || 4;
-    const allowSc = isFS && C.FREESPINS.scatterInFreeSpins;
-    let winX = 0;
-    for (;;) {
-      const { m, wild } = arrCounts(arr);
-      // NUR EIN Gewinn-Typ pro Tumble (erste in Symbol-Reihenfolge: K, Q, J, ...).
-      let winId = null, x = 0;
-      for (const sym of C.SYMBOLS) {
-        if (sym.kind === "wild" || sym.kind === "scatter") continue;
-        const cnt = m[sym.id] || 0;
-        if (!cnt) continue;
-        const p = M.payX(sym, cnt + wild);
-        if (p > 0) { winId = sym.id; x = p; break; }
-      }
-      if (!winId) break;
-      winX += x;
-      // nur diesen Typ (+ Wilds) entfernen und auffüllen; Scatter nur in FS und max cap
-      let sc = countScatters(arr);
-      for (let i = 0; i < arr.length; i++) {
-        const id = arr[i];
-        if (id === "SC") continue;
-        const def = ID[id];
-        if (def.kind === "wild" || id === winId) {
-          let nid;
-          if (allowSc && sc < cap) { nid = M.pick(rng).id; if (nid === "SC") sc++; }
-          else nid = M.pickNoSc(rng).id;
-          arr[i] = nid;
-        }
-      }
-    }
-    return { winX, scatters: Math.min(countScatters(arr), cap) };
-  };
 
   M.triggerAward = function (scatters) {
     const t = LF.CONFIG.FREESPINS.trigger;
@@ -152,32 +124,38 @@
     return a;
   };
 
+  // Retrigger-Spins für eine Scatter-Anzahl (analog triggerAward: höchste passende Schwelle).
+  M.retriggerSpins = function (scatters) {
+    const rt = LF.CONFIG.FREESPINS.retriggerByScatters || {};
+    let a = 0;
+    for (const k in rt) if (scatters >= +k) a = rt[k];
+    return a;
+  };
+
   M.runFreeSpins = function (rng, award) {
     const C = LF.CONFIG;
     const mc = C.FREESPINS.multiplier;
-    const rt = C.FREESPINS.retriggerByScatters || {};
     const maxSpins = C.FREESPINS.maxSpins || 400;
     let left = award, fsWin = 0, done = 0;
-    let m = mc.start || 1; // Per-Spin-Multiplikator, wächst pro gewonnenem Spin
+    let m = mc.start || 1; // Gewinn-Multiplikator: gilt fürs ganze Feature, steigt JEDEN Spin
     while (left > 0 && done < maxSpins) {
       left--; done++;
-      const arr = fillArr(rng, C.COLS * C.ROWS);
-      const r = M.resolveArr(rng, arr, true);
-      fsWin += r.winX * m;                                   // Spin-Win × aktueller Multi
-      if (r.winX > 0) m = Math.min(mc.max || 100, m + (mc.perSpin || 1));
-      if (r.scatters >= 3) left += (rt[3] || 0);             // Retrigger nur 3+
+      const reels = fillReels(rng);
+      const w = M.waysEval(reels).totalX;
+      fsWin += w * m;                                       // Spin-Win × aktueller Multi
+      m = Math.min(mc.max || 100, m + (mc.perSpin || 1));   // Multi wächst mit JEDEM Freispiel
+      left += M.retriggerSpins(countScattersReels(reels));  // Retrigger nach Config-Schwelle
     }
     return fsWin;
   };
 
   // Ein kompletter Basis-Spin inkl. evtl. Free Spins, gedeckelt auf MAX_WIN_X.
-  // Liefert den Gewinn als Vielfaches des Einsatzes.
   M.playSpinX = function (rng) {
     const C = LF.CONFIG;
-    const arr = fillArr(rng, C.COLS * C.ROWS);
-    const base = M.resolveArr(rng, arr, false);
-    let total = base.winX;
-    if (base.scatters >= 3) total += M.runFreeSpins(rng, M.triggerAward(base.scatters));
+    const reels = fillReels(rng);
+    let total = M.waysEval(reels).totalX;
+    const sc = countScattersReels(reels);
+    if (sc >= 3) total += M.runFreeSpins(rng, M.triggerAward(sc));
     return Math.min(total, C.MAX_WIN_X);
   };
 
@@ -189,39 +167,26 @@
   };
 
   /* ---------- Positions-Auswertung (für die Animation in engine.js) ---------- */
-  // idGrid[col][row] = id | null  ->  { wins, totalX, remove:[[c,r]], scatters }
+  // idGrid[col][row] = id | null  ->  { totalX, winCells:[[c,r]], lines, scatters }
   M.evaluate = function (idGrid) {
-    const ID = LF.SYMBOL_BY_ID;
-    const m = {}, symCells = {}, wildCells = [];
-    let wild = 0, scatters = 0;
-    for (let c = 0; c < idGrid.length; c++) {
-      for (let r = 0; r < idGrid[c].length; r++) {
-        const id = idGrid[c][r];
-        if (id == null) continue;
-        const k = ID[id].kind;
-        if (k === "wild") { wild++; wildCells.push([c, r]); }
-        else if (k === "scatter") { scatters++; }
-        else { m[id] = (m[id] || 0) + 1; (symCells[id] || (symCells[id] = [])).push([c, r]); }
+    const C = LF.CONFIG, ID = LF.SYMBOL_BY_ID;
+    const ws = M.waysEval(idGrid);
+    // Gewinn-Zellen: pro Line alle Zellen mit dem Symbol/Wild auf den ersten N Walzen.
+    const cellSet = new Set();
+    for (const ln of ws.lines) {
+      for (let c = 0; c < ln.reels; c++) {
+        const col = idGrid[c];
+        for (let r = 0; r < col.length; r++) {
+          const id = col[r]; if (id == null) continue;
+          if (id === ln.id || ID[id].kind === "wild") cellSet.add(c + "," + r);
+        }
       }
     }
-    // NUR EIN Gewinn-Typ pro Schritt (erste in Symbol-Reihenfolge) -> sequentieller Flow.
-    const remove = [];
-    const wins = [];
-    let totalX = 0;
-    for (const sym of LF.CONFIG.SYMBOLS) {
-      if (sym.kind === "wild" || sym.kind === "scatter") continue;
-      const cnt = m[sym.id] || 0;
-      if (!cnt) continue;
-      const x = M.payX(sym, cnt + wild);
-      if (x > 0) {
-        totalX = x;
-        for (const cell of symCells[sym.id]) remove.push(cell);
-        for (const cell of wildCells) remove.push(cell);
-        wins.push({ id: sym.id, count: cnt + wild, x });
-        break;
-      }
-    }
-    return { wins, totalX, remove, scatters };
+    const winCells = Array.from(cellSet).map((k) => k.split(",").map(Number));
+    let scatters = 0;
+    for (let c = 0; c < idGrid.length; c++) for (let r = 0; r < idGrid[c].length; r++) { const id = idGrid[c][r]; if (id && ID[id].kind === "scatter") scatters++; }
+    scatters = Math.min(scatters, C.MAX_SCATTERS || 5);
+    return { totalX: ws.totalX, winCells, lines: ws.lines, scatters };
   };
 
   LF.Math = M;

@@ -94,7 +94,7 @@
 
       // 3 Feature-Cards (Platzhalter)
       const cards = [
-        { t: "TUMBLE", d: "Gewinne fallen,\nneue Symbole rutschen nach.", a: 0x2bb3c0 },
+        { t: "3125 WAYS", d: "5×5 Raster —\nlinks nach rechts,\n3+ gleiche zahlen.", a: 0x2bb3c0 },
         { t: "FREE SPINS", d: "3 / 4 Scatter →\nFreispiele mit\nwachsendem Multiplikator.", a: 0xff7a2f },
         { t: "MAX WIN", d: "Bis zu\n10.000× Einsatz.", a: 0xf4c430 },
       ];

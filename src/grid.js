@@ -1,5 +1,5 @@
 /* ============================================================
-   GRID — SymbolSprite (Platzhalter-Kachel) + Grid (6×5, Tumble-Logik).
+   GRID — SymbolSprite (Kachel) + Grid (5×5, Ways: Win-Highlight statt Tumble).
    ============================================================ */
 (function () {
   const LF = (window.LF = window.LF || {});
@@ -384,6 +384,20 @@
       ]);
     }
 
+    // WAYS: Symbol bleibt nach dem Win liegen -> Pop/Glow/Flash sanft auf Normal zurückfahren.
+    async resetWin() {
+      if (this._dead) return;
+      const b = this._spBase || 1;
+      LF.tween.killOf(this.sprite.scale); LF.tween.killOf(this.glow); LF.tween.killOf(this.backdrop); LF.tween.killOf(this.flash);
+      await Promise.all([
+        LF.tween.to(this.sprite.scale, { x: b, y: b }, 170, LF.ease.outQuad),
+        LF.tween.to(this.glow, { alpha: 0 }, 170, LF.ease.outQuad),
+        LF.tween.to(this.backdrop, { alpha: 0 }, 170, LF.ease.outQuad),
+        LF.tween.to(this.flash, { alpha: 0 }, 120, LF.ease.outQuad),
+      ]);
+      if (!this._dead) this.sprite.rotation = 0;
+    }
+
     // Sanfter Dauer-Puls + Glow (Scatter-Tension, wenn 2+ Scatter gelandet sind).
     startGlowPulse() {
       if (this._dead || this._pulseOn) return;
@@ -419,14 +433,15 @@
     /* ---- Scatter-Orbit: Licht wandert im Kreis um den Scatter (Sweat) ---- */
     _buildOrbit() {
       if (this.orbit) return;
-      const s = C.CELL, R = s * 0.86;
+      // Ring deutlich kleiner: sitzt hinter dem Scatter INNERHALB der Zelle, nicht weit übers Feld.
+      const s = C.CELL, R = s * 0.48;
       const o = new PIXI.Container(); o.position.set(s / 2, s / 2); o.alpha = 0;
       const track = new PIXI.Sprite(trackTex());
-      track.anchor.set(0.5); track.width = track.height = R * 2.5; track.blendMode = PIXI.BLEND_MODES.ADD; track.alpha = 0;
+      track.anchor.set(0.5); track.width = track.height = s * 1.1; track.blendMode = PIXI.BLEND_MODES.ADD; track.alpha = 0;
       o.addChild(track);
       const mk = (size) => { const c = new PIXI.Sprite(cometTex()); c.anchor.set(0.5); c.width = c.height = size; c.blendMode = PIXI.BLEND_MODES.ADD; return c; };
-      const c1 = mk(s * 0.66); c1.position.set(R, 0);
-      const c2 = mk(s * 0.42); c2.position.set(-R, 0);
+      const c1 = mk(s * 0.44); c1.position.set(R, 0);
+      const c2 = mk(s * 0.28); c2.position.set(-R, 0);
       o.addChild(c1); o.addChild(c2);
       this.orbit = o; this._orbitTrack = track;
       this.addChild(o); // ganz oben -> Licht über den Zellrändern
@@ -568,9 +583,10 @@
       // alles mit NICHT-Scatter füllen
       for (let c = 0; c < C.COLS; c++)
         for (let r = 0; r < C.ROWS; r++) this._placeAbove(this.rng.weightedPick(this._paySymbols), c, r);
-      // genau scatterCount Scatter setzen (2 früh -> Sweat, Rest gespreizt für Reveals)
+      // genau scatterCount Scatter setzen (2 früh -> Sweat, Rest gespreizt für Reveals).
+      // 5 Walzen (0..4): erst 0+1 (Sweat startet), dann 3,4,2 für gespreizte Reveals.
       const cols = [0, 1];
-      const pool = [3, 5, 4, 2];
+      const pool = [3, 4, 2];
       for (let i = 0; cols.length < scatterCount && i < pool.length; i++) cols.push(pool[i]);
       const SC = LF.SYMBOL_BY_ID["SC"];
       for (const col of cols.slice(0, scatterCount)) {
@@ -846,6 +862,21 @@
       return g;
     }
 
+    // WAYS-Gewinn: die Gewinn-Zellen aufleuchten lassen (KEIN Entfernen), dann ausklingen.
+    async highlightWins(cells) {
+      if (!cells || !cells.length) return;
+      const sprites = [], plays = [];
+      for (const cell of cells) {
+        const c = cell[0], r = cell[1];
+        const sp = this.cells[c] && this.cells[c][r];
+        if (sp && !sp._dead) { sprites.push(sp); plays.push(sp.playWin()); }
+      }
+      await Promise.all(plays);
+      await LF.delay(C.TIMING.winHold || 220);          // kurz halten -> Gewinn klar sichtbar
+      await Promise.all(sprites.map((sp) => sp.resetWin()));
+    }
+
+    // [UNUSED ab Ways-Umstellung — kein Tumble mehr. Bleibt für evtl. Cascade-Modus.]
     // Entfernt die Zellen in removeSet ("col,row") und lässt darüber nachrutschen,
     // füllt oben mit neuen Symbolen auf (Tumble).
     async applyTumble(removeSet) {

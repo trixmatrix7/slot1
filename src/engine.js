@@ -187,43 +187,29 @@
       if (totalX >= 15) await this.ui.showWinCelebration(win, totalX);
     }
 
-    /* ---------- Tumble-Loop für ein Board (Animation) ---------- */
-    // Cascade-Auflösung: pro Tumble EIN Symbol-Typ, sammelt den BASIS-Win
-    // (KEIN Multiplikator hier — der kommt in FS am Spin-Ende).
+    /* ---------- WAYS-Auflösung eines Boards (Animation) ---------- */
+    // Einmalige Ways-Auswertung (KEIN Tumble): Gewinn-Zellen aufleuchten, Basis-Win
+    // sammeln (OHNE Multiplikator — der kommt in FS am Spin-Ende). Liefert {winX, scatters}.
     async _resolveBoard() {
-      let boardX = 0, step = 0;
-      for (;;) {
-        const res = LF.Math.evaluate(this.grid.toIdGrid());
-        if (res.totalX <= 0) break;
-
-        boardX += res.totalX;
+      const res = LF.Math.evaluate(this.grid.toIdGrid());
+      if (res.totalX > 0) {
         this._runningX += res.totalX;
-
-        step++;
-        if (LF.sound) LF.sound.connect(step); // Handschellen-Klick pro Connection
-
-        const removeSet = new Set(res.remove.map(([c, r]) => c + "," + r));
-        const highlights = [];
-        removeSet.forEach((key) => {
-          const [c, r] = key.split(",").map(Number);
-          const sp = this.grid.cells[c][r];
-          if (sp) highlights.push(sp.playWin());
-        });
-        await Promise.all(highlights);
-
+        if (LF.sound) LF.sound.connect(1); // ein Connection-Klick pro Gewinn-Spin
         this.ui.setWin(this._runningX * this.stake);
-        await this.grid.applyTumble(removeSet);
-        await LF.delay(C.TIMING.stepPause || 120); // kurze Pause -> Connections sichtbar nacheinander
+        await this.grid.highlightWins(res.winCells);
       }
-      return { winX: boardX, scatters: this.grid.countScatters() };
+      return { winX: res.totalX, scatters: res.scatters };
     }
 
-    /* ---------- Free-Spins-Feature (Per-Spin-Multiplikator) ---------- */
+    /* ---------- Free-Spins-Feature (progressiver Multiplikator) ---------- */
+    // Identisch zu math.js M.runFreeSpins (damit der Sim-RTP 1:1 gilt):
+    //   - jeder FS-Spin: Basis-Ways-Win × aktueller Multiplikator
+    //   - Multiplikator steigt mit JEDEM Freispiel um +perSpin (bleibt das ganze Feature)
+    //   - Retrigger nach Config-Schedule (2 Scatter -> +5, 3+ -> +10)
     async _runFreeSpins(award) {
       const mc = C.FREESPINS.multiplier;
-      const rt = C.FREESPINS.retriggerByScatters || {};
       let total = award, done = 0;
-      let m = mc.start || 1;                 // wächst +perSpin pro gewonnenem Spin
+      let m = mc.start || 1;
       const startX = this._runningX;
 
       this.grid.allowScatterRefill = !!C.FREESPINS.scatterInFreeSpins;
@@ -234,28 +220,32 @@
       while (done < total && done < C.FREESPINS.maxSpins) {
         done++;
         this.ui.updateFreeSpins(done, total);
-        this.ui.setFSMultiplier(m);
+        this.ui.setFSMultiplier(m);                 // Multiplikator dieses Spins
 
         await this.grid.spawnAll();
         const spinStartX = this._runningX;
-        const r = await this._resolveBoard(); // sammelt Basis-Win des Spins (zeigt mitlaufend)
+        const r = await this._resolveBoard();       // Basis-Ways-Win des Spins
         const spinBaseX = this._runningX - spinStartX;
 
-        // Am Spin-Ende: Multi fliegt auf den Betrag, Betrag multipliziert sich.
+        // Aktueller Multiplikator fliegt auf den Spin-Betrag.
         if (spinBaseX > 0 && m > 1) {
           const finalX = spinBaseX * m;
           await this.ui.multiplyWin(spinBaseX * this.stake, m, finalX * this.stake);
           this._runningX += (finalX - spinBaseX);
           this.ui.setWin(this._runningX * this.stake);
         }
-        if (spinBaseX > 0) { m = Math.min(mc.max || 100, m + (mc.perSpin || 1)); this.ui.setFSMultiplier(m); }
 
-        // Retrigger nur bei 3+ Scatter
-        if (r.scatters >= 3) {
-          const ex = rt[3] || 0;
+        // Multiplikator steigt mit JEDEM Freispiel (nicht nur bei Gewinn).
+        m = Math.min(mc.max || 100, m + (mc.perSpin || 1));
+        this.ui.setFSMultiplier(m);
+
+        // Retrigger nach Config-Schedule (2+ Scatter).
+        const ex = LF.Math.retriggerSpins(r.scatters);
+        if (ex > 0) {
           total += ex;
           this.ui.flashMessage("+" + ex + " FREE SPINS");
           this.ui.updateFreeSpins(done, total);
+          if (this.grid.scatterWinBurst) await this.grid.scatterWinBurst();
           await LF.delay(700);
         }
         await LF.delay(C.TIMING.betweenSpinsFS);

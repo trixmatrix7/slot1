@@ -565,8 +565,11 @@
       if (LF.textures && LF.textures[id]) { const sp = new PIXI.Sprite(LF.textures[id]); sp.anchor.set(0.5, 0); sp.width = sp.height = 84; sp.position.set(cx, topY); o.addChild(sp); }
       let y = topY + 96;
       if (def.pays) {
+        // WAYS: pays[N reels] = Auszahlung PRO WAY. Anzeige "N → x.xx×" (× Gesamteinsatz, je Way).
         Object.keys(def.pays).sort((a, b) => b - a).forEach((k) => {
-          const row = pTxtM(k + "+    ×" + (def.pays[k] * C.PAY_SCALE).toFixed(2), 14.5, 0xdcdcdc, { weight: "800", align: "center" });
+          const v = def.pays[k] * (C.PAY_SCALE || 1);
+          const vs = v >= 0.1 ? v.toFixed(2) : v.toFixed(3);
+          const row = pTxtM(k + " →  " + vs + "×", 14.5, 0xdcdcdc, { weight: "800", align: "center" });
           row.anchor.set(0.5, 0); row.position.set(cx, y); o.addChild(row); y += 28;
         });
       } else {
@@ -579,7 +582,7 @@
       const fx = (px, pw, f) => px + f * pw;
       return [
         { title: "GAME RULES", render: (o, px, py, pw, ph, cx) => {
-          const d = pTxtM("Symbols pay anywhere on the 6×5 grid by count (scatter-pays). After every win the winning symbols are removed and new ones drop in — wins keep cascading (Tumble) until none land. Pays shown as × total bet.", 13.5, 0xc2c4c7, { weight: "700", align: "center", lh: 20, wrap: pw - 160 });
+          const d = pTxtM("WAYS slot on a 5×5 grid — 3125 ways. Matching symbols pay left to right on consecutive reels, starting from the leftmost reel (3, 4 or 5 of a kind). A symbol's win = its per-way pay × the number of ways (the product of its count on each winning reel). WILD substitutes for all pay symbols. Pays below are PER WAY, × total bet.", 13.5, 0xc2c4c7, { weight: "700", align: "center", lh: 20, wrap: pw - 160 });
           d.anchor.set(0.5, 0); d.position.set(cx, py + 92); o.addChild(d);
           const ids = ["BOSS2", "BOSS1", "WHISKEY", "CUFFS"], xs = [0.18, 0.39, 0.61, 0.82];
           ids.forEach((id, i) => this._paySym(o, fx(px, pw, xs[i]), py + 188, id));
@@ -592,16 +595,17 @@
           ids.forEach((id, i) => this._paySym(o, fx(px, pw, xs[i]), py + 120, id));
         } },
         { title: "MAIN GAME FEATURE", render: (o, px, py, pw, ph, cx) => {
-          this._section(o, px + 80, py + 110, pw - 160, "TUMBLE / CASCADE", "Winning symbols are removed after every win and new symbols drop into the empty spots. Wins keep cascading within the same spin until no further win lands. Each cascade pays its own win.");
-          this._section(o, px + 80, py + 250, pw - 160, "SPECIAL SYMBOLS", "WILD substitutes for all paying symbols. SCATTER does not pay but triggers the Free Spins feature. The two characters (Guard, Inmate), the hammer and the knife are the high-value symbols.");
+          this._section(o, px + 80, py + 110, pw - 160, "WAYS — 3125 LINES", "There are no fixed paylines. A symbol wins when it lands on consecutive reels from the leftmost reel (3+). The number of ways is the product of how many of that symbol sit on each winning reel — up to 5×5×5×5×5 = 3125 ways. Each symbol pays independently and the wins are added together.");
+          this._section(o, px + 80, py + 250, pw - 160, "SPECIAL SYMBOLS", "WILD substitutes for all paying symbols on every reel. SCATTER does not pay but triggers the Free Spins feature. The two characters (Guard, Inmate), the hammer and the knife are the high-value symbols.");
         } },
         { title: "FREE SPINS", render: (o, px, py, pw, ph, cx) => {
           const t3 = C.FREESPINS.trigger[3] || 10, t4 = C.FREESPINS.trigger[4] || 12;
-          this._section(o, px + 80, py + 110, pw - 160, "TRIGGER", "3 Scatters award " + t3 + " Free Spins, 4 Scatters award " + t4 + ". A per-spin multiplier grows by +1 on every winning spin and applies to that spin's total win.");
-          this._section(o, px + 80, py + 250, pw - 160, "RETRIGGER & BONUS BUY", "3+ Scatters during Free Spins award additional spins. You can also buy the feature directly via Bonus Buy, or activate the Boost (3× scatter chance, bet ×3).");
+          const mc = C.FREESPINS.multiplier || {}, ms = mc.start || 1, mp = mc.perSpin || 1;
+          this._section(o, px + 80, py + 110, pw - 160, "TRIGGER & MULTIPLIER", "3 Scatters award " + t3 + " Free Spins, 4 Scatters award " + t4 + ". A win multiplier starts at " + ms + "× and grows by +" + mp + " on EVERY free spin. It applies to each spin's win and lasts the whole feature — long features climb into the hundreds.");
+          this._section(o, px + 80, py + 250, pw - 160, "RETRIGGER & BONUS BUY", "2 Scatters during Free Spins award +5 spins, 3+ award +10 — features can run long. You can also buy the feature directly via Bonus Buy, or activate the Boost (3× scatter chance, bet ×3).");
         } },
         { title: "GAME RULES", render: (o, px, py, pw, ph, cx) => {
-          this._section(o, px + 80, py + 110, pw - 160, "RTP & VOLATILITY", "Theoretical RTP ≈ 96%. High volatility. All wins are added to your balance at the end of each spin sequence.");
+          this._section(o, px + 80, py + 110, pw - 160, "RTP & VOLATILITY", "Theoretical RTP ≈ 96%. Very high volatility — most of the payback rides on the Free Spins. All wins are added to your balance at the end of the spin.");
           this._section(o, px + 80, py + 230, pw - 160, "MAX WIN", "The maximum win per spin including the feature is capped at " + C.MAX_WIN_X.toLocaleString("en-US") + "× your bet.");
           this._section(o, px + 80, py + 350, pw - 160, "PROVABLY FAIR", "Every result is provably fair (commit/reveal, keccak256 — see the dice icon). Malfunction voids all pays and plays.");
         } },

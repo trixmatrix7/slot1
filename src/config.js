@@ -1,7 +1,7 @@
 /* ============================================================
    CONFIG — alle Spielparameter an EINER Stelle.
-   Mechanik: Tumble (Cascade) + Scatter-Pays (Zählen überall im Raster).
-   Symbole/Background ersetzt du später; hier nur Platzhalter-Defs.
+   Mechanik: WAYS (5×5 = 3125 Ways, links nach rechts, kein Tumble) +
+   Scatter-getriggerte Free Spins mit progressivem Multiplikator.
    ============================================================ */
 (function () {
   // Dual-Environment: funktioniert im Browser UND in Node (für den Simulator).
@@ -12,14 +12,14 @@
   const DESIGN_W = 1200;
   const DESIGN_H = 675;
 
-  // --- Raster: 6 Spalten × 5 Reihen (aus dem Original-Screenshot abgelesen) ---
-  const COLS = 6;
+  // --- Raster: 5 Walzen × 5 Reihen (Ways-System, 5^5 = 3125 Ways) ---
+  const COLS = 5;
   const ROWS = 5;
 
   const CELL = 86;   // Kachelgröße (dichter, wie im Original)
   const GAP = 2;     // Abstand zwischen Kacheln (Symbole fast bündig)
 
-  const GRID_W = COLS * CELL + (COLS - 1) * GAP;   // 526
+  const GRID_W = COLS * CELL + (COLS - 1) * GAP;   // 438 (5×86 + 4×2)
   const GRID_H = ROWS * CELL + (ROWS - 1) * GAP;   // 438
 
   // Raster leicht oberhalb der Mitte, zentriert (Controls liegen unten).
@@ -73,21 +73,24 @@
      Reihenfolge = aufsteigender Wert (low -> high). */
   // Höhere Schwellen + deutlich höhere Pays (volatiler: dickere Wins, öfter mal nix).
   // Großer Spread Low->High = hohe Varianz. Level wird per PAY_SCALE auf 96% getunt.
+  // WAYS-Pays: pays[ANZAHL ZUSAMMENHÄNGENDER WALZEN von links] = Auszahlung PRO WAY
+  // (× Anzahl Ways × PAY_SCALE × Einsatz). Wild ersetzt alle Pay-Symbole.
+  // Großer Spread Low->High = hohe Varianz, fetter Tail Richtung 10.000×.
   const SYMBOLS = [
-    // Low / Royals (blaue Buchstaben)
-    { id: "K", label: "K", tex: "symbol_low_e", kind: "royal", weight: 30, pays: { 9: 0.5, 12: 2, 15: 8 } },
-    { id: "Q", label: "Q", tex: "symbol_low_f", kind: "royal", weight: 28, pays: { 9: 0.6, 12: 2.5, 15: 10 } },
-    { id: "J", label: "J", tex: "symbol_low_g", kind: "royal", weight: 26, pays: { 9: 0.8, 12: 3, 15: 12 } },
+    // Low / Royals (Metall-Buchstaben)
+    { id: "K", label: "K", tex: "symbol_low_e", kind: "royal", weight: 26, pays: { 4: 1, 5: 4 } },
+    { id: "Q", label: "Q", tex: "symbol_low_f", kind: "royal", weight: 24, pays: { 4: 1.2, 5: 5 } },
+    { id: "J", label: "J", tex: "symbol_low_g", kind: "royal", weight: 22, pays: { 4: 1.5, 5: 6 } },
     // Mid
-    { id: "CUFFS",   label: "Hammer", tex: "symbol_mid_c", kind: "mid", weight: 16, pays: { 8: 2, 10: 12, 13: 60 } },
-    { id: "WHISKEY", label: "Messer", tex: "symbol_mid_d", kind: "mid", weight: 13, pays: { 8: 3, 10: 18, 13: 100 } },
-    // High (Charaktere) — sehr hoher Top-End für fetten Tail Richtung 10.000×
-    { id: "BOSS1", label: "Wärter",   tex: "symbol_high_a", kind: "high", weight: 10, pays: { 8: 12, 10: 70, 12: 500 } },
-    { id: "BOSS2", label: "Häftling", tex: "symbol_high_b", kind: "high", weight: 8,  pays: { 8: 22, 10: 140, 12: 1500 } },
+    { id: "CUFFS",   label: "Hammer", tex: "symbol_mid_c", kind: "mid", weight: 16, pays: { 3: 0.8, 4: 4, 5: 26 } },
+    { id: "WHISKEY", label: "Messer", tex: "symbol_mid_d", kind: "mid", weight: 13, pays: { 3: 1, 4: 5, 5: 35 } },
+    // High (Charaktere) — sehr hoher Top-End (Jackpot-artige 5er) für fetten Tail Richtung 10.000×
+    { id: "BOSS1", label: "Wärter",   tex: "symbol_high_a", kind: "high", weight: 10, pays: { 3: 2, 4: 14, 5: 140 } },
+    { id: "BOSS2", label: "Häftling", tex: "symbol_high_b", kind: "high", weight: 8,  pays: { 3: 3, 4: 25, 5: 250 } },
     // Wild — ersetzt alle Pay-Symbole (kein eigener Pay)
-    { id: "W",  label: "WILD",    tex: "symbol_wild",    kind: "wild",    weight: 6, pays: null },
-    // Scatter — löst Free Spins aus, zahlt nicht, bleibt beim Tumble liegen
-    { id: "SC", label: "SCATTER", tex: "symbol_scatter", kind: "scatter", weight: 1.5, pays: null },
+    { id: "W",  label: "WILD",    tex: "symbol_wild",    kind: "wild",    weight: 5, pays: null },
+    // Scatter — löst Free Spins aus, zahlt nicht
+    { id: "SC", label: "SCATTER", tex: "symbol_scatter", kind: "scatter", weight: 2.0, pays: null },
   ];
 
   /* -----------------------------------------------------------------
@@ -98,13 +101,14 @@
                      bleibt das gesamte Feature über bestehen (Hacksaw-Stil).
   ----------------------------------------------------------------- */
   const FREESPINS = {
-    trigger: { 3: 10, 4: 12, 5: 15, 6: 20 }, // 3 Scatter -> 10 FS, 4 Scatter -> 12 FS
-    // Retrigger IN FS: NUR 3+ Scatter -> +4 Spins (deutlich seltener -> kürzere Features).
-    retriggerByScatters: { 3: 4 },
-    scatterInFreeSpins: true,     // Scatter dürfen in FS via Cascade reindroppen (max MAX_SCATTERS)
-    // Per-Spin-Multiplikator: pro GEWONNENEM FS-Spin +perSpin; am Spin-Ende wird der
-    // Spin-Win × m gerechnet (Multi fliegt visuell auf den Betrag). Bleibt sane (~Feature-Länge).
-    multiplier: { start: 1, perSpin: 1, max: 100 },
+    trigger: { 3: 10, 4: 12, 5: 15 }, // 3 Scatter -> 10 FS, 4 -> 12, 5 -> 15
+    // Retrigger IN FS: 2 Scatter -> +5, 3+ -> +10. Häufige Retrigger -> gelegentlich sehr
+    // lange Features, in denen der Multiplikator in die Hunderter klettert (Tail bis 10.000×).
+    retriggerByScatters: { 2: 5, 3: 10 },
+    scatterInFreeSpins: true,     // (Ways: jeder FS-Spin ist ein frischer Drop, Scatter retriggern)
+    // Progressiver Gewinn-Multiplikator: steigt mit JEDEM Freispiel um +perSpin und gilt fürs
+    // ganze Feature. Lange (retriggerte) Features klettern in die Hunderter -> Tail bis 10.000×.
+    multiplier: { start: 2, perSpin: 3, max: 5000 },
     maxSpins: 400,                // Sicherheits-Cap gegen Endlos-Retrigger
   };
 
@@ -112,8 +116,8 @@
   const BUY = {
     // Feature-Käufe: Kosten = costMult × Grundeinsatz, vergibt Free Spins wie N Scatter.
     feature: {
-      3: { cost: 100, scatters: 3 },   // 3 Scatter Feature -> 100×
-      4: { cost: 200, scatters: 4 },   // 4 Scatter Feature -> 200×
+      3: { cost: 104, scatters: 3 },   // 3 Scatter Feature (10 FS) -> 104× (Buy-RTP ~96%, per Sim)
+      4: { cost: 144, scatters: 4 },   // 4 Scatter Feature (12 FS) -> 144× (Buy-RTP ~96%, per Sim)
     },
     // Boost ("3× Freispiel-Chance"): Toggle. AN -> Einsatz ×3/Spin, Scatter ×3 häufiger.
     boost: {
@@ -135,6 +139,7 @@
     dropStagger: 70,     // Versatz pro Spalte beim Reinfallen
     dropDuration: 430,   // Falldauer pro Symbol
     winHighlight: 500,   // Win-Anim-Dauer: 30 Frames über 500ms = exakt 1 Frame/60Hz-Tick (gleichmäßig)
+    winHold: 240,        // Ways: Gewinn-Symbole nach dem Pop kurz halten, bevor sie ausklingen
     landingDur: 260,     // Dauer der Landing-Animation (fire-and-forget beim Landen) — kurz/snappy
     tumbleDrop: 380,     // Nachrutschen nach Entfernen
     stepPause: 150,      // kleine Pause zwischen den Connection-Schritten
@@ -152,20 +157,19 @@
     ASSET_PATH, ANIM_PATH, SYMBOLS, SYMBOL_ANIM, FREESPINS, BUY,
     BET_LEVELS, DEFAULT_BET_INDEX, START_BALANCE,
     TIMING,
-    // Scatter-Pays: Mindestanzahl, ab der ein Symbol überhaupt zahlt.
-    MIN_PAY_COUNT: 8,
+    // WAYS: Mindestanzahl zusammenhängender Walzen (von links), ab der gezahlt wird.
+    MIN_WAYS_REELS: 3,
     // Max-Win-Cap: Gesamtgewinn eines Spins (inkl. Feature) ist gedeckelt.
     MAX_WIN_X: 10000,
-    // Max. Scatter pro Board (Drop) — nie mehr als 4.
-    MAX_SCATTERS: 4,
+    // Max. Scatter pro Board (Drop) — bis 5 (eine pro Walze für den Sweat).
+    MAX_SCATTERS: 5,
     // Grundgröße je Symbol-Art (× Zelle). Non-Premium (royals) kleiner für klare
     // visuelle Hierarchie Premium vs. Non-Premium. Scatter wird separat (1.34) behandelt.
     SYMBOL_SCALE: { royal: 0.82, mid: 1.0, high: 1.0, wild: 1.0 },
     // RTP-Skalierung: globaler Faktor auf alle Auszahlungen (vom Simulator getunt).
-    // 0.1573 -> ~96.0% RTP (1-Typ-pro-Tumble + Per-Spin-Multi, höhere Pays, Scatter-Cap 4).
-    // (Alt 0.1848 -> ~96.0% RTP (1-Typ-pro-Tumble + additiver +1-Multi; kalibriert:
-    // 0.182->94.75%, 0.185->96.09% @14M -> interpoliert 0.1848).)
-    PAY_SCALE: 0.1573,
+    // WAYS-System (5×5, 3125 Ways): per simfast.js auf 96.0% kalibriert (50 Mio Spins/Skala).
+    // Profil: Hit 80%, FS 1-in-141, Basis ~22.5% / FS ~73.5% RTP, Max-Win 10.000× erreichbar.
+    PAY_SCALE: 0.003134,
   };
 
   // Schnellzugriff per id
